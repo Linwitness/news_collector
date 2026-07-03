@@ -1,0 +1,16 @@
+[
+  { "name": "Al Jazeera", "rss": "https://www.aljazeera.com/xml/rss/all.xml" },
+  { "name": "Reuters (Google News)", "rss": "https://news.google.com/rss/search?q=site:reuters.com+when:24h&ceid=US:en&hl=en-US&gl=US" },
+  { "name": "BBC World", "rss": "http://feeds.bbci.co.uk/news/world/rss.xml" },
+  { "name": "NPR World", "rss": "https://feeds.npr.org/1004/rss.xml" },
+  { "name": "AP News (Google News)", "rss": "https://news.google.com/rss/search?q=when:24h+allinurl:apnews.com&ceid=US:en&hl=en-US&gl=US" },
+  { "name": "The Guardian World", "rss": "https://www.theguardian.com/world/rss" },
+  { "name": "Foreign Policy", "rss": "https://foreignpolicy.com/feed/" },
+  { "name": "CNBC Finance", "rss": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664" },
+  { "name": "CNBC Economy", "rss": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258" },
+  { "name": "WSJ Markets", "rss": "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain" },
+  { "name": "MarketWatch", "rss": "https://www.marketwatch.com/rss/topstories" },
+  { "name": "Yahoo Finance", "rss": "https://finance.yahoo.com/news/rssindex" },
+  { "name": "Bloomberg Markets", "rss": "https://feeds.bloomberg.com/markets/news.rss" },
+  { "name": "Seeking Alpha", "rss": "https://seekingalpha.com/market_currents.xml" }
+]

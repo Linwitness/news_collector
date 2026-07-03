@@ -1,0 +1,9 @@
+logs/
+output/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+.DS_Store
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

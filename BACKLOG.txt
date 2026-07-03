@@ -1,0 +1,34 @@
+News Collector — Improvement Backlog
+=====================================
+
+## High Priority
+- [ ] Add retry logic with exponential backoff for RSS fetch failures
+- [ ] Deduplicate articles across topics (same story scored for multiple topics)
+- [ ] Cache fetched articles to avoid re-fetching within same day
+- [ ] Support for non-RSS sources (web scraping specific sites with BeautifulSoup)
+
+## Features
+- [ ] Email delivery of daily reports (SMTP integration)
+- [ ] Telegram or Slack bot integration for push notifications
+- [ ] Topic-specific provider overrides (some topics have niche sources)
+- [ ] Support for keyword exclusions per topic (e.g., exclude "Iran nuclear deal" when tracking modern war)
+- [ ] Sentiment scoring per article before sending to Claude
+- [ ] Source credibility scoring / weighting
+- [ ] Interactive web dashboard to browse/search past reports
+
+## Quality
+- [ ] Validate Claude output format (check required sections are present)
+- [ ] Truncate large daily MD files before feeding to weekly summary (token budget)
+- [ ] Add date range to weekly summary filename for clarity
+- [ ] Write unit tests for fetch_news.py keyword scoring and deduplication
+
+## Infrastructure
+- [ ] Docker container for cross-platform portability
+- [ ] GitHub Actions alternative to cron (for cloud execution)
+- [ ] Store articles in SQLite for historical search
+- [ ] Rate limiting: respect RSS feed request intervals
+
+## Nice to Have
+- [ ] Multi-language topic support (fetch Chinese-language feeds for China topics)
+- [ ] Auto-detect new major topics from high-volume keyword clustering
+- [ ] Monthly digest summarizing all weekly summaries

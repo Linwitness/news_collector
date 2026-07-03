@@ -1,0 +1,17 @@
+[
+  {
+    "id": "us_iran_war",
+    "name": "USA-Iran War",
+    "keywords": ["Iran", "USA", "US-Iran", "IRGC", "Hormuz", "Tehran", "Pentagon", "Operation Epic Fury", "Kharg", "Isfahan"]
+  },
+  {
+    "id": "us_china_relations",
+    "name": "US-China Relations",
+    "keywords": ["China", "Taiwan", "trade war", "tariffs", "CCP", "Xi Jinping", "South China Sea", "semiconductor", "Huawei", "decoupling"]
+  },
+  {
+    "id": "stock_market",
+    "name": "Stock Market",
+    "keywords": ["stock", "S&P 500", "Nasdaq", "Dow Jones", "Wall Street", "Fed", "interest rate", "earnings", "IPO", "bull market", "bear market", "rally", "sell-off", "market crash", "Treasury", "inflation", "recession", "GDP"]
+  }
+]
