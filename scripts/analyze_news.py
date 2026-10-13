@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 
-from llm import LLM, get_llm, response_text
+from llm import LLM, create, get_llm
 
 
 def load_questions(questions_path: str) -> str:
@@ -148,13 +148,7 @@ Translate section headers too. Keep URL hrefs as-is but translate anchor text.
 
 {english_report}"""
 
-    message = llm.client.messages.create(
-        model=llm.translation_model,
-        max_tokens=llm.translation_max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-        **llm.extra,
-    )
-    return response_text(message)
+    return create(llm, prompt, translation=True)
 
 
 def analyze_topic(
@@ -183,13 +177,7 @@ def analyze_topic(
     )
 
     print(f"  Calling {llm.provider} ({llm.model}) for topic '{topic['name']}' …")
-    message = llm.client.messages.create(
-        model=llm.model,
-        max_tokens=llm.max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-        **llm.extra,
-    )
-    english_report = response_text(message)
+    english_report = create(llm, prompt)
 
     print(f"  Translating to Chinese ({llm.translation_model}) …")
     chinese_report = _translate_to_chinese(llm, english_report, topic["name"])

@@ -10,7 +10,7 @@ import os
 import glob
 from datetime import datetime
 
-from llm import LLM, get_llm, response_text
+from llm import LLM, create, get_llm
 
 
 def get_recent_daily_files(daily_dir: str, topic_id: str, n: int = 7) -> list[str]:
@@ -20,17 +20,39 @@ def get_recent_daily_files(daily_dir: str, topic_id: str, n: int = 7) -> list[st
     return files[:n]
 
 
-def get_last_weekly(weekly_dir: str) -> str:
-    """Return the content of the most recent weekly summary, or empty string."""
+REPORT_SEPARATOR = "\n---\n---\n"  # between the English and Chinese halves
+
+# Keywords for the five required H2 sections (models sometimes reword a
+# header slightly, e.g. "Compared" for "Compares").
+REQUIRED_SECTIONS = ["Key Events", "Last Week", "Evolving Trends", "Trend Predictions", "Sources"]
+
+
+def english_part(report: str) -> str:
+    """Return the English half of a bilingual report."""
+    return report.split(REPORT_SEPARATOR, 1)[0].strip()
+
+
+def get_last_weekly(weekly_dir: str, topic_name: str) -> str:
+    """Return this topic's English section of the most recent weekly summary, or ""."""
     pattern = os.path.join(weekly_dir, "weekly_summary_*.md")
     files = sorted(glob.glob(pattern), reverse=True)
     if not files:
         return ""
-    try:
-        with open(files[0]) as f:
-            return f.read()
-    except Exception:
+    content = read_file(files[0])
+    start = content.find(f"# {topic_name}: Weekly Summary")
+    if start == -1:
         return ""
+    return english_part(content[start:])
+
+
+def check_weekly(report: str) -> tuple[str, list[str]]:
+    """Drop any preamble before the title; return (report, missing section names)."""
+    start = report.find("# ")
+    if start > 0:
+        report = report[start:]
+    headers = [ln for ln in report.splitlines() if ln.startswith("## ")]
+    missing = [s for s in REQUIRED_SECTIONS if not any(s.lower() in h.lower() for h in headers)]
+    return report, missing
 
 
 def read_file(path: str) -> str:
@@ -56,7 +78,7 @@ def build_weekly_prompt(
         prior_weekly_block = f"""
 ## Prior Weekly Summary (for continuity reference):
 
-{last_weekly[:4000]}
+{last_weekly}
 
 ---
 """
@@ -112,13 +134,7 @@ Translate section headers too. Keep URL hrefs as-is but translate anchor text.
 
 {english_report}"""
 
-    message = llm.client.messages.create(
-        model=llm.translation_model,
-        max_tokens=llm.translation_max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-        **llm.extra,
-    )
-    return response_text(message)
+    return create(llm, prompt, translation=True)
 
 
 def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[tuple]:
@@ -127,7 +143,7 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
     Returns a list of (topic_name, english_report, chinese_report) tuples so the
     caller can build a Telegram digest. Empty list if nothing was generated.
     """
-    llm = get_llm(settings)
+    llm = get_llm(settings, task="weekly")
 
     output_dir = os.path.join(base_dir, settings["output_dir"])
     daily_dir = os.path.join(output_dir, "daily")
@@ -148,19 +164,19 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
             print(f"    No daily files found for {topic['id']} — skipping.")
             continue
 
-        daily_contents = [(f, read_file(f)) for f in daily_files]
-        last_weekly = get_last_weekly(weekly_dir)
+        daily_contents = [(f, english_part(read_file(f))) for f in daily_files]
+        last_weekly = get_last_weekly(weekly_dir, topic["name"])
 
         prompt = build_weekly_prompt(topic, daily_contents, last_weekly, date_str)
 
         print(f"    Calling {llm.provider} ({llm.model}) …")
-        message = llm.client.messages.create(
-            model=llm.model,
-            max_tokens=llm.max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-            **llm.extra,
-        )
-        english_report = response_text(message)
+        # One retry if sections are missing; after that keep it with a warning
+        # (raising here would drop every topic's weekly summary).
+        for attempt in (1, 2):
+            english_report, missing = check_weekly(create(llm, prompt))
+            if not missing:
+                break
+            print(f"    WARNING: missing sections {missing} (attempt {attempt}/2)")
 
         print(f"    Translating to Chinese ({llm.translation_model}) …")
         chinese_report = _translate_to_chinese(llm, english_report)

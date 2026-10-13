@@ -19,14 +19,34 @@ class LLM:
     translation_model: str
     max_tokens: int
     translation_max_tokens: int
-    # Must be passed to every client.messages.create call.
+    # Extra request params (e.g. thinking) for analysis and translation calls.
     extra: dict = field(default_factory=dict)
+    translation_extra: dict = field(default_factory=dict)
 
 
-def get_llm(settings: dict) -> LLM:
-    """Build the LLM handle for settings["active_llm"]."""
+def _thinking_param(value) -> dict:
+    """Map a provider "thinking" setting to request params.
+
+    false -> disabled; a dict is sent as-is (e.g. {"type": "adaptive"});
+    absent -> the provider's default. DeepSeek thinks by default and the
+    thinking counts against max_tokens, which can leave no room for the report.
+    """
+    if value is False:
+        return {"thinking": {"type": "disabled"}}
+    if isinstance(value, dict):
+        return {"thinking": value}
+    return {}
+
+
+def get_llm(settings: dict, task: str = None) -> LLM:
+    """Build the LLM handle for settings["active_llm"].
+
+    task (e.g. "weekly") merges the provider's matching override block into the
+    analysis settings; translation always uses the base settings.
+    """
     name = settings["active_llm"]
-    cfg = settings["llm_providers"][name]
+    base = settings["llm_providers"][name]
+    cfg = {**base, **base.get(task, {})} if task else base
 
     api_key = os.environ.get(cfg["api_key_env"])
     if not api_key:
@@ -40,22 +60,32 @@ def get_llm(settings: dict) -> LLM:
     )
     model = cfg["model"]
 
-    # DeepSeek thinks by default and the thinking counts against max_tokens,
-    # which can leave no room for the report itself.
-    extra = {}
-    if cfg.get("thinking") is False:
-        extra["thinking"] = {"type": "disabled"}
-
     return LLM(
         client=client,
         provider=name,
         model=model,
-        translation_model=cfg.get("translation_model", model),
-        # Kept <= ~21000: the SDK rejects larger non-streaming requests.
+        translation_model=base.get("translation_model", base["model"]),
         max_tokens=cfg.get("max_tokens", 8000),
-        translation_max_tokens=cfg.get("translation_max_tokens", 12000),
-        extra=extra,
+        translation_max_tokens=base.get("translation_max_tokens", 12000),
+        extra=_thinking_param(cfg.get("thinking")),
+        translation_extra=_thinking_param(base.get("thinking")),
     )
+
+
+def create(llm: LLM, prompt: str, translation: bool = False) -> str:
+    """Send one single-turn request and return its text.
+
+    Streams so large max_tokens values don't hit the SDK's non-streaming limit
+    or HTTP timeouts.
+    """
+    with llm.client.messages.stream(
+        model=llm.translation_model if translation else llm.model,
+        max_tokens=llm.translation_max_tokens if translation else llm.max_tokens,
+        messages=[{"role": "user", "content": prompt}],
+        **(llm.translation_extra if translation else llm.extra),
+    ) as stream:
+        message = stream.get_final_message()
+    return response_text(message)
 
 
 def response_text(message) -> str:

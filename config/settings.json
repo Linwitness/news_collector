@@ -15,7 +15,12 @@
       "translation_model": "deepseek-flash",
       "thinking": false,
       "max_tokens": 16000,
-      "translation_max_tokens": 20000
+      "translation_max_tokens": 20000,
+      "weekly": {
+        "_comment": "Thinking on for the weekly synthesis: in testing it was better grounded (thinking off invented an event and graded last week's predictions too generously)",
+        "thinking": {"type": "enabled"},
+        "max_tokens": 32000
+      }
     }
   },
   "output_dir": "output",
