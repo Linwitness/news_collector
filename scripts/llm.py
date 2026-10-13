@@ -8,10 +8,23 @@ Anthropic-compatible endpoint), so only key, base_url and model names differ.
 
 import anthropic
 import os
+from dataclasses import dataclass, field
 
 
-def get_llm(settings: dict) -> tuple:
-    """Return (client, model, translation_model, provider_name)."""
+@dataclass
+class LLM:
+    client: anthropic.Anthropic
+    provider: str
+    model: str
+    translation_model: str
+    max_tokens: int
+    translation_max_tokens: int
+    # Must be passed to every client.messages.create call.
+    extra: dict = field(default_factory=dict)
+
+
+def get_llm(settings: dict) -> LLM:
+    """Build the LLM handle for settings["active_llm"]."""
     name = settings["active_llm"]
     cfg = settings["llm_providers"][name]
 
@@ -26,9 +39,36 @@ def get_llm(settings: dict) -> tuple:
         api_key=api_key, base_url=cfg.get("base_url") or None, max_retries=5
     )
     model = cfg["model"]
-    return client, model, cfg.get("translation_model", model), name
+
+    # DeepSeek thinks by default and the thinking counts against max_tokens,
+    # which can leave no room for the report itself.
+    extra = {}
+    if cfg.get("thinking") is False:
+        extra["thinking"] = {"type": "disabled"}
+
+    return LLM(
+        client=client,
+        provider=name,
+        model=model,
+        translation_model=cfg.get("translation_model", model),
+        # Kept <= ~21000: the SDK rejects larger non-streaming requests.
+        max_tokens=cfg.get("max_tokens", 8000),
+        translation_max_tokens=cfg.get("translation_max_tokens", 12000),
+        extra=extra,
+    )
 
 
 def response_text(message) -> str:
-    """Join the text blocks of a response, skipping thinking blocks (DeepSeek emits them first)."""
-    return "".join(b.text for b in message.content if b.type == "text")
+    """Join the text blocks of a response, skipping thinking blocks.
+
+    Raises if there is no text, so callers retry instead of writing an empty report.
+    """
+    text = "".join(b.text for b in message.content if b.type == "text")
+    if not text.strip():
+        raise RuntimeError(
+            f"LLM returned no text (stop_reason={message.stop_reason}, "
+            f"output_tokens={message.usage.output_tokens})"
+        )
+    if message.stop_reason == "max_tokens":
+        print(f"  WARNING: response truncated at max_tokens ({message.usage.output_tokens} tokens)")
+    return text

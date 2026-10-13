@@ -46,8 +46,8 @@ All configuration is in `config/`:
 ## Key Design Decisions
 
 - **Topic IDs are the canonical key** — The `id` in `topics.json` must match the `##` section headers in `default_questions.md` and is used as the output filename prefix.
-- **Single LLM call per topic per day** (plus one translation call) — `analyze_news.py` bundles all articles and questions into one prompt (max 8000 tokens).
-- **Provider-agnostic via the anthropic SDK** — DeepSeek is reached through its Anthropic-compatible endpoint, so every provider uses `client.messages.create`. Always read responses with `response_text()` (DeepSeek returns a thinking block before the text).
+- **Single LLM call per topic per day** (plus one translation call) — `analyze_news.py` bundles all articles and questions into one prompt. Output caps are per-provider in settings.json (default 8000 / 12000 for translation; DeepSeek 16000 / 20000). Keep them ≤ ~21000, because the SDK rejects larger non-streaming requests.
+- **Provider-agnostic via the anthropic SDK** — DeepSeek is reached through its Anthropic-compatible endpoint, so every provider uses `client.messages.create`. `get_llm()` returns an `LLM` object (client, models, per-provider `max_tokens`/`translation_max_tokens`, `extra`). Pass `llm.extra` to every `messages.create` call and read replies with `response_text()`. DeepSeek thinks by default, and the thinking uses up `max_tokens` (which produced empty reports). `"thinking": false` in a provider's config disables it. `response_text()` raises on an empty reply so the retry logic catches it.
 - **Friday detection** — Weekly summaries trigger automatically via `datetime.now().weekday() == 4` in `run_workflow.py`.
 - **questions.md is ephemeral** — It's overwritten with an empty template after each run if questions were present.
 - **Alerts make no API calls** — the alert poller ships raw headlines; only the daily/weekly paths spend Claude tokens.

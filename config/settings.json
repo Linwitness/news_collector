@@ -12,7 +12,10 @@
       "api_key_env": "GENERAL_API_KEY",
       "base_url": "https://api.deepseek.com/anthropic",
       "model": "deepseek-flash",
-      "translation_model": "deepseek-flash"
+      "translation_model": "deepseek-flash",
+      "thinking": false,
+      "max_tokens": 16000,
+      "translation_max_tokens": 20000
     }
   },
   "output_dir": "output",

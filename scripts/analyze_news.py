@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 
-from llm import get_llm, response_text
+from llm import LLM, get_llm, response_text
 
 
 def load_questions(questions_path: str) -> str:
@@ -138,7 +138,7 @@ If there are no one-off questions, write: *No questions submitted for today.*]
 """
 
 
-def _translate_to_chinese(client, model: str, english_report: str, topic_name: str) -> str:
+def _translate_to_chinese(llm: LLM, english_report: str, topic_name: str) -> str:
     """Translate an English report to Chinese using the provider's translation model."""
     prompt = f"""Translate the following English news report into Chinese.
 Keep all markdown formatting, section structure, and source URLs intact.
@@ -148,10 +148,11 @@ Translate section headers too. Keep URL hrefs as-is but translate anchor text.
 
 {english_report}"""
 
-    message = client.messages.create(
-        model=model,
-        max_tokens=12000,
+    message = llm.client.messages.create(
+        model=llm.translation_model,
+        max_tokens=llm.translation_max_tokens,
         messages=[{"role": "user", "content": prompt}],
+        **llm.extra,
     )
     return response_text(message)
 
@@ -165,7 +166,7 @@ def analyze_topic(
     date_str: str,
 ) -> str:
     """Call the active LLM and return the full markdown report string."""
-    client, model, translation_model, provider = get_llm(settings)
+    llm = get_llm(settings)
 
     if not articles:
         no_news_note = (
@@ -181,18 +182,17 @@ def analyze_topic(
         topic, articles_for_prompt, standing_questions, user_questions, date_str
     )
 
-    print(f"  Calling {provider} ({model}) for topic '{topic['name']}' …")
-    message = client.messages.create(
-        model=model,
-        max_tokens=8000,
+    print(f"  Calling {llm.provider} ({llm.model}) for topic '{topic['name']}' …")
+    message = llm.client.messages.create(
+        model=llm.model,
+        max_tokens=llm.max_tokens,
         messages=[{"role": "user", "content": prompt}],
+        **llm.extra,
     )
     english_report = response_text(message)
 
-    print(f"  Translating to Chinese ({translation_model}) …")
-    chinese_report = _translate_to_chinese(
-        client, translation_model, english_report, topic["name"]
-    )
+    print(f"  Translating to Chinese ({llm.translation_model}) …")
+    chinese_report = _translate_to_chinese(llm, english_report, topic["name"])
 
     return english_report + "\n\n---\n---\n\n" + chinese_report
 
