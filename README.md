@@ -15,11 +15,16 @@ cp .env.example .env   # then fill in your keys
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | Claude API access for analysis |
+| `ANTHROPIC_API_KEY` | if Anthropic active | Claude API access for analysis |
 | `TELEGRAM_BOT_TOKEN` | optional | Telegram bot for digests & alerts |
 | `TELEGRAM_CHAT_ID` | optional | Chat that receives the messages |
+| `GENERAL_API_KEY` | if DeepSeek active | DeepSeek API key (current active LLM provider) |
 
 Without the Telegram variables the pipeline still runs and writes reports; only the notifications are skipped.
+
+### Switching LLM provider
+
+In `config/settings.json`, set `active_llm` to `"deepseek"` or `"anthropic"`. Each entry under `llm_providers` names its key's env var, `base_url`, analysis `model` and `translation_model`.
 
 ## Run Manually
 

@@ -1,6 +1,20 @@
 {
-  "anthropic_api_key_env": "ANTHROPIC_API_KEY",
-  "model": "claude-sonnet-4-6",
+  "active_llm": "deepseek",
+  "llm_providers": {
+    "anthropic": {
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "base_url": null,
+      "model": "claude-sonnet-4-6",
+      "translation_model": "claude-haiku-4-5-20251001"
+    },
+    "deepseek": {
+      "_comment": "deepseek-flash is the API id for DeepSeek-V4.1-Flash",
+      "api_key_env": "GENERAL_API_KEY",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "model": "deepseek-flash",
+      "translation_model": "deepseek-flash"
+    }
+  },
   "output_dir": "output",
   "max_articles_per_topic": 40,
   "hours_lookback": 24,

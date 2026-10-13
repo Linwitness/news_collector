@@ -5,11 +5,12 @@ Called every Friday by run_workflow.py.
 Outputs output/weekly/weekly_summary_{YYYYMMDD}.md
 """
 
-import anthropic
 import json
 import os
 import glob
 from datetime import datetime
+
+from llm import get_llm, response_text
 
 
 def get_recent_daily_files(daily_dir: str, topic_id: str, n: int = 7) -> list[str]:
@@ -101,11 +102,8 @@ Produce a comprehensive weekly synthesis in the following EXACT markdown format 
 """
 
 
-TRANSLATION_MODEL = "claude-haiku-4-5-20251001"
-
-
-def _translate_to_chinese(client, english_report: str) -> str:
-    """Translate an English weekly report to Chinese using Haiku."""
+def _translate_to_chinese(client, model: str, english_report: str) -> str:
+    """Translate an English weekly report to Chinese using the provider's translation model."""
     prompt = f"""Translate the following English news report into Chinese.
 Keep all markdown formatting, section structure, and source URLs intact.
 Translate section headers too. Keep URL hrefs as-is but translate anchor text.
@@ -115,11 +113,11 @@ Translate section headers too. Keep URL hrefs as-is but translate anchor text.
 {english_report}"""
 
     message = client.messages.create(
-        model=TRANSLATION_MODEL,
+        model=model,
         max_tokens=12000,
         messages=[{"role": "user", "content": prompt}],
     )
-    return message.content[0].text
+    return response_text(message)
 
 
 def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[tuple]:
@@ -128,14 +126,7 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
     Returns a list of (topic_name, english_report, chinese_report) tuples so the
     caller can build a Telegram digest. Empty list if nothing was generated.
     """
-    api_key = os.environ.get(settings["anthropic_api_key_env"])
-    if not api_key:
-        raise EnvironmentError(
-            f"Environment variable {settings['anthropic_api_key_env']} is not set."
-        )
-
-    client = anthropic.Anthropic(api_key=api_key, max_retries=5)
-    model = settings.get("model", "claude-sonnet-4-6")
+    client, model, translation_model, provider = get_llm(settings)
 
     output_dir = os.path.join(base_dir, settings["output_dir"])
     daily_dir = os.path.join(output_dir, "daily")
@@ -161,16 +152,16 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
 
         prompt = build_weekly_prompt(topic, daily_contents, last_weekly, date_str)
 
-        print(f"    Calling Claude ({model}) …")
+        print(f"    Calling {provider} ({model}) …")
         message = client.messages.create(
             model=model,
             max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
-        english_report = message.content[0].text
+        english_report = response_text(message)
 
-        print(f"    Translating to Chinese ({TRANSLATION_MODEL}) …")
-        chinese_report = _translate_to_chinese(client, english_report)
+        print(f"    Translating to Chinese ({translation_model}) …")
+        chinese_report = _translate_to_chinese(client, translation_model, english_report)
 
         combined_sections.append(english_report + "\n\n---\n---\n\n" + chinese_report)
         weekly_reports.append((topic["name"], english_report, chinese_report))

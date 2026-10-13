@@ -20,7 +20,7 @@ The pipeline runs in this sequence (all orchestrated by `scripts/run_workflow.py
 
 1. **Fetch** (`scripts/fetch_news.py`) — Pulls RSS feeds from `config/providers.json`, scores articles by keyword match against topics in `config/topics.json`, deduplicates by URL, returns top N articles per topic.
 
-2. **Analyze** (`scripts/analyze_news.py`) — For each topic, builds a Claude prompt with the scored articles + standing questions, calls the Claude API, writes a bilingual (EN + Chinese) markdown report to `output/daily/{topic_id}_{YYYYMMDD}.md`. Retried up to 3 times per topic with backoff in `run_workflow.py`.
+2. **Analyze** (`scripts/analyze_news.py`) — For each topic, builds a prompt with the scored articles + standing questions, calls the active LLM (via `get_llm` in `scripts/llm.py`), writes a bilingual (EN + Chinese) markdown report to `output/daily/{topic_id}_{YYYYMMDD}.md`. Retried up to 3 times per topic with backoff in `run_workflow.py`.
 
 3. **Notify** (`scripts/notify.py`) — Builds a concise Chinese digest from the daily reports and sends it via Telegram (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`; skipped if unset). Messages are auto-chunked under Telegram's 4096-char limit.
 
@@ -37,7 +37,7 @@ Separately, **`scripts/alert_news.py`** (run hourly via `scripts/alert_cron.sh`)
 ## Configuration
 
 All configuration is in `config/`:
-- **`settings.json`** — Model name, output dir, `max_articles_per_topic`, `hours_lookback`, plus alert tuning (`alert_lookback_hours`, `alert_score_threshold`, `alert_state_path`, `alert_seen_ttl_days`)
+- **`settings.json`** — `active_llm` (selects an entry in `llm_providers`: env var for the key, `base_url`, `model`, `translation_model`), output dir, `max_articles_per_topic`, `hours_lookback`, plus alert tuning (`alert_lookback_hours`, `alert_score_threshold`, `alert_state_path`, `alert_seen_ttl_days`)
 - **`topics.json`** — Topic `id`, `name`, and `keywords` array. The `id` field is the filename prefix and the key used in `default_questions.md`.
 - **`providers.json`** — RSS feed URLs and source names
 - **`config/default_questions.md`** — Standing questions answered in every report. Uses `## Global` for all topics and `## {topic_id}` for topic-specific questions. Parsed by `load_standing_questions()` in `analyze_news.py`.
@@ -46,7 +46,8 @@ All configuration is in `config/`:
 ## Key Design Decisions
 
 - **Topic IDs are the canonical key** — The `id` in `topics.json` must match the `##` section headers in `default_questions.md` and is used as the output filename prefix.
-- **Single Claude call per topic per day** — `analyze_news.py` makes one API call per topic with all articles and questions bundled into the prompt (max 8192 tokens).
+- **Single LLM call per topic per day** (plus one translation call) — `analyze_news.py` bundles all articles and questions into one prompt (max 8000 tokens).
+- **Provider-agnostic via the anthropic SDK** — DeepSeek is reached through its Anthropic-compatible endpoint, so every provider uses `client.messages.create`. Always read responses with `response_text()` (DeepSeek returns a thinking block before the text).
 - **Friday detection** — Weekly summaries trigger automatically via `datetime.now().weekday() == 4` in `run_workflow.py`.
 - **questions.md is ephemeral** — It's overwritten with an empty template after each run if questions were present.
 - **Alerts make no API calls** — the alert poller ships raw headlines; only the daily/weekly paths spend Claude tokens.
