@@ -80,6 +80,10 @@ python3 scripts/fetch_papers.py          # fetch only: show candidates per topic
 - **Pipeline** — fetch the last `papers.lookback_days`, drop corrections/retractions, merge preprint/journal/dataset versions of a work, skip papers already reported (`output/state/seen_papers.json`), keyword-score, then: an LLM triage per topic (thinking on, to screen out pseudo-science) picks up to `papers.max_papers_per_topic`, each paper is kept in a single topic — one whose `milestones` description the triage matched it to (e.g. a record result goes to Fusion Energy Development and into its Highlights), else its best-scoring topic — and a report call writes `papers.highlights_per_topic` Highlights, a Paper Digest of every other selected paper, Research Trends & Analysis, Compared with Last Week, and checkable Predictions. Links are checked against the fetched items; anything else is removed. A topic's optional `report_guidance` is passed to the report prompt.
 - **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest with the highlight links.
 
+### Planned improvements
+
+1. **Read selected papers in detail.** The report currently works from titles and abstracts only (and some journal items have no abstract). Fetch the full text (open-access PDF/HTML, e.g. arXiv or OpenAlex `open_access` links) for the selected papers, at least the Highlights, and base summaries, trends and predictions on methods, results and limitations rather than the abstract alone.
+
 ## Ask a One-Off Question
 
 Edit `questions.md` and add your question. It will be answered in the next run and then the file will be reset.
