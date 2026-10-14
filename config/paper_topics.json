@@ -1,0 +1,59 @@
+[
+  {
+    "id": "ai_physical_modeling",
+    "name": "AI & LLMs for Physics-Based Modeling",
+    "description": "Two strands, in priority order. (1) LLMs, transformer models, AI agents and foundation models used to build, run, accelerate or interpret physics-based models and simulations (fluids, plasma, nuclear, materials, multiphysics, PDE solvers). (2) Physics-informed neural networks (PINNs) and neural operators for physical modeling. Out of scope: LLM work not about modeling physical systems (chip/circuit design automation, networking, social or economic simulation, education, security).",
+    "report_guidance": "Order Highlights and the Paper Digest with LLM/transformer/agent work first and PINN/neural-operator work after; give each strand its own sub-theme group in the digest. If there is little LLM/transformer work this week, say so and let PINN work fill the Highlights.",
+    "keywords": ["large language model", "LLM", "AI agent", "agentic", "foundation model", "neural operator", "physics-informed", "PINN", "surrogate model", "scientific machine learning", "machine learning", "deep learning", "multiphysics", "finite element", "digital twin", "simulation", "physical modeling", "PDE", "computational physics", "molecular dynamics"],
+    "min_score": 3,
+    "arxiv_query": "(abs:\"large language model\" OR abs:LLM OR abs:\"foundation model\" OR abs:transformer OR abs:\"AI agent\" OR abs:agentic OR abs:\"neural operator\" OR abs:\"physics-informed\") AND (cat:physics.comp-ph OR cat:physics.flu-dyn OR cat:physics.plasm-ph OR cat:cond-mat.mtrl-sci OR cat:nucl-th OR abs:simulation OR abs:\"physical model\" OR abs:multiphysics)",
+    "queries": [
+      "(\"large language model\" OR LLM OR transformer OR \"AI agent\" OR \"foundation model\") AND (physics OR \"physical system\" OR \"numerical simulation\" OR solver OR \"partial differential\" OR \"fluid dynamics\" OR \"finite element\" OR multiphysics OR plasma)",
+      "(\"physics-informed neural network\" OR PINN OR \"neural operator\") AND (simulation OR modeling OR modelling OR solver)",
+      "(\"large language model\" OR LLM OR \"AI agent\" OR agentic) AND (simulation OR CFD OR \"scientific computing\" OR \"computational science\" OR \"scientific machine learning\")"
+    ],
+    "require": [
+      ["large language model", "LLM", "language model", "AI agent", "agentic", "foundation model", "neural operator", "physics-informed", "PINN", "surrogate", "machine learning", "deep learning", "neural network", "generative AI", "transformer"],
+      ["physics", "physical", "multiphysics", "CFD", "computational fluid dynamics", "finite element", "fluid", "plasma", "fusion", "materials", "nuclear", "PDE", "partial differential", "heat transfer", "molecular dynamics", "mechanics", "thermal"]
+    ]
+  },
+  {
+    "id": "tritium_fuel_cycle",
+    "name": "Tritium Transport & Fuel Cycle",
+    "description": "Hydrogen-isotope (especially tritium) transport, permeation, retention, diffusion and trapping in materials; breeding blankets and tritium breeding ratio; plasma-facing components; fuel-cycle modeling, inventory, extraction and detritiation; lithium-6 enrichment and isotope separation for breeding; codes such as FESTIM and TMAP.",
+    "keywords": ["tritium", "hydrogen isotope", "deuterium", "permeation", "retention", "diffusion", "trapping", "breeding blanket", "tritium breeding", "TBR", "fuel cycle", "FESTIM", "TMAP", "tungsten", "plasma-facing", "lithium-lead", "PbLi", "detritiation", "inventory", "outgassing", "lithium-6", "lithium isotope", "isotope separation"],
+    "min_score": 2,
+    "arxiv_query": "abs:tritium OR abs:\"hydrogen isotope\" OR abs:\"breeding blanket\" OR (abs:deuterium AND (abs:retention OR abs:permeation OR abs:trapping)) OR (abs:hydrogen AND abs:permeation)",
+    "queries": [
+      "tritium AND (transport OR permeation OR retention OR diffusion OR trapping OR inventory OR \"fuel cycle\" OR breeding)",
+      "\"hydrogen isotope\" AND (permeation OR retention OR trapping OR diffusion) AND (tungsten OR fusion OR \"plasma-facing\")",
+      "\"breeding blanket\" OR \"tritium breeding ratio\"",
+      "\"lithium isotope\" OR \"lithium-6\" OR (deuterium AND (retention OR permeation OR trapping))"
+    ]
+  },
+  {
+    "id": "fusion_modeling",
+    "name": "Fusion Plasma & Reactor Modeling",
+    "description": "Modeling and simulation of magnetic and inertial fusion plasmas and reactors: core and edge transport, turbulence, gyrokinetics, MHD and disruptions, scrape-off layer and divertor, integrated/whole-device modeling, neutronics, reactor systems codes, and ML for plasma prediction and control.",
+    "keywords": ["tokamak", "stellarator", "gyrokinetic", "MHD", "magnetohydrodynamic", "turbulence", "transport", "edge plasma", "scrape-off layer", "divertor", "SOLPS", "disruption", "integrated modeling", "whole-device", "neutronics", "plasma control", "fusion", "plasma", "simulation", "inertial confinement"],
+    "min_score": 3,
+    "arxiv_query": "cat:physics.plasm-ph AND (abs:tokamak OR abs:stellarator OR abs:gyrokinetic OR abs:fusion OR abs:divertor OR abs:disruption OR abs:\"inertial confinement\" OR abs:\"magnetic confinement\" OR abs:\"fast ion\" OR abs:\"energetic particle\" OR abs:pedestal OR abs:\"runaway electron\")",
+    "queries": [
+      "tokamak OR stellarator OR \"spherical torus\" OR \"magnetic confinement fusion\"",
+      "fusion AND (neutronics OR \"systems code\" OR \"integrated modeling\" OR \"digital twin\") AND reactor"
+    ]
+  },
+  {
+    "id": "fusion_development",
+    "name": "Fusion Energy Development",
+    "description": "Progress toward fusion energy: experimental milestones (ITER, JET legacy, JT-60SA, EAST, KSTAR, W7-X, NIF, SPARC), pilot plants and DEMO designs, private fusion companies, materials and engineering readiness, regulation and licensing, funding and policy.",
+    "keywords": ["fusion energy", "fusion power", "fusion reactor", "pilot plant", "ITER", "SPARC", "ARC", "JT-60SA", "EAST", "KSTAR", "Wendelstein", "NIF", "ignition", "DEMO", "Commonwealth Fusion", "Helion", "TAE", "Tokamak Energy", "General Fusion", "private fusion", "milestone", "regulation", "licensing", "funding", "inertial fusion", "fusion"],
+    "milestones": "items reporting a new experimental result, record or first for a fusion device or concept (plasma temperature, density, confinement time, pulse length, gain or yield; first plasma; a new machine or major subsystem coming online), or a major program decision (funding award, licence, site, construction start).",
+    "min_score": 2,
+    "arxiv_query": "abs:\"fusion power plant\" OR abs:\"fusion reactor\" OR abs:\"fusion energy\" OR abs:\"fusion pilot plant\" OR abs:\"inertial fusion energy\" OR abs:EU-DEMO OR (abs:ITER AND abs:tokamak)",
+    "queries": [
+      "\"fusion energy\" OR \"fusion power\" OR \"fusion reactor\" OR \"fusion pilot plant\"",
+      "((ITER OR SPARC) AND (tokamak OR fusion)) OR \"EU-DEMO\" OR \"inertial fusion energy\""
+    ]
+  }
+]

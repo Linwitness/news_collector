@@ -65,6 +65,21 @@ Edit `config/providers.json`:
 { "name": "My Source", "rss": "https://example.com/feed.xml" }
 ```
 
+## Weekly Paper Report
+
+A separate weekly job collects new research papers (plus a few fusion news items) and writes an analysis with predictions. Every item it discusses is linked.
+
+```bash
+python3 scripts/run_papers.py            # normal run
+python3 scripts/run_papers.py --fresh    # ignore "already reported" state (for testing)
+python3 scripts/fetch_papers.py          # fetch only: show candidates per topic, no LLM calls
+```
+
+- **Topics** — `config/paper_topics.json`: `name`, a `description` of the scope (used by the LLM), `keywords` (scoring), `min_score`, an `arxiv_query`, `queries` for OpenAlex/OSTI, and optional `require` groups (an item must match one keyword from each group).
+- **Sources** — `config/paper_sources.json`: arXiv, OpenAlex (most journals), OSTI (DOE reports), journal RSS feeds (Nuclear Fusion, PPCF, Fusion Eng. Des., Nucl. Mater. Energy, J. Nucl. Mater., Physics of Plasmas), and fusion news feeds limited to the development topic (`"topics"`, `"kind": "news"`). An RSS source can set `core_topics` (its papers count as on-topic even without keyword hits) and `openalex_issn` (fill missing abstracts from OpenAlex — ScienceDirect feeds carry titles only).
+- **Pipeline** — fetch the last `papers.lookback_days`, drop corrections/retractions, merge preprint/journal/dataset versions of a work, skip papers already reported (`output/state/seen_papers.json`), keyword-score, then: an LLM triage per topic (thinking on, to screen out pseudo-science) picks up to `papers.max_papers_per_topic`, each paper is kept in a single topic — one whose `milestones` description the triage matched it to (e.g. a record result goes to Fusion Energy Development and into its Highlights), else its best-scoring topic — and a report call writes `papers.highlights_per_topic` Highlights, a Paper Digest of every other selected paper, Research Trends & Analysis, Compared with Last Week, and checkable Predictions. Links are checked against the fetched items; anything else is removed. A topic's optional `report_guidance` is passed to the report prompt.
+- **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest with the highlight links.
+
 ## Ask a One-Off Question
 
 Edit `questions.md` and add your question. It will be answered in the next run and then the file will be reset.
@@ -123,6 +138,18 @@ Load it with:
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.newscollector.daily.plist
 ```
 
+### Weekly paper report (launchd)
+
+`scripts/papers_cron.sh` runs `run_papers.py` and skips if a report already exists for the current ISO week. Use the plist above with a new `Label` (e.g. `com.example.newscollector.papers`), `scripts/papers_cron.sh` in `ProgramArguments`, `logs/papers.launchd.log` for output, and a weekly `StartCalendarInterval`:
+```xml
+<key>StartCalendarInterval</key>
+<dict>
+    <key>Weekday</key><integer>6</integer>   <!-- Saturday -->
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+</dict>
+```
+
 ## Project Structure
 
 ```
@@ -130,6 +157,8 @@ news_collector/
 ├── config/
 │   ├── topics.json          # Topics + keywords (user-editable)
 │   ├── providers.json       # RSS feed URLs (user-editable)
+│   ├── paper_topics.json    # Paper-report topics, keywords, search queries
+│   ├── paper_sources.json   # Paper sources (arXiv, OpenAlex, OSTI, journal/news RSS)
 │   ├── settings.json        # API/model settings + alert tuning
 │   └── default_questions.md # Standing questions (answered every day)
 ├── scripts/
@@ -138,13 +167,18 @@ news_collector/
 │   ├── weekly_summary.py    # Friday weekly synthesis
 │   ├── notify.py            # Telegram digests (daily + weekly)
 │   ├── alert_news.py        # Near-real-time headline alerts (no API calls)
+│   ├── fetch_papers.py      # Paper fetching, dedup, scoring
+│   ├── analyze_papers.py    # Paper triage + weekly paper report
+│   ├── run_papers.py        # Weekly paper-report entry point
+│   ├── papers_cron.sh       # Weekly paper wrapper (idempotent per ISO week)
 │   ├── run_workflow.py      # Main orchestrator
 │   ├── run_cron.sh          # Daily wrapper (idempotent)
 │   └── alert_cron.sh        # Alert poller wrapper
 ├── output/
 │   ├── daily/               # {topic_id}_{YYYYMMDD}.md
 │   ├── weekly/              # weekly_summary_{YYYYMMDD}.md
-│   └── state/               # Alert dedup state
+│   ├── papers/              # papers_{YYYYMMDD}.md
+│   └── state/               # Alert and paper dedup state
 ├── questions.md             # One-off Q&A (cleared after each run)
 ├── requirements.txt
 └── BACKLOG.txt              # Improvement ideas

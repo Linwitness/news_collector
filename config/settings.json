@@ -20,6 +20,11 @@
         "_comment": "Thinking on for the weekly synthesis: in testing it was better grounded (thinking off invented an event and graded last week's predictions too generously)",
         "thinking": {"type": "enabled"},
         "max_tokens": 32000
+      },
+      "papers": {
+        "_comment": "Thinking on for the weekly paper analysis (same reasoning as weekly)",
+        "thinking": {"type": "enabled"},
+        "max_tokens": 32000
       }
     }
   },
@@ -29,5 +34,13 @@
   "alert_lookback_hours": 2,
   "alert_score_threshold": 2,
   "alert_state_path": "output/state/seen_urls.json",
-  "alert_seen_ttl_days": 7
+  "alert_seen_ttl_days": 7,
+  "papers": {
+    "lookback_days": 7,
+    "candidates_per_topic": 150,
+    "max_papers_per_topic": 50,
+    "highlights_per_topic": 5,
+    "seen_ttl_days": 90,
+    "state_path": "output/state/seen_papers.json"
+  }
 }

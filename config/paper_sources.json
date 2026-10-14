@@ -1,0 +1,16 @@
+[
+  { "name": "arXiv", "type": "arxiv" },
+  { "name": "OpenAlex", "type": "openalex" },
+  { "name": "OSTI (DOE)", "type": "osti" },
+
+  { "name": "Nuclear Fusion (IOP)", "type": "rss", "core_topics": ["fusion_modeling", "fusion_development"], "rss": "https://iopscience.iop.org/journal/rss/0029-5515" },
+  { "name": "Plasma Physics and Controlled Fusion (IOP)", "type": "rss", "core_topics": ["fusion_modeling"], "rss": "https://iopscience.iop.org/journal/rss/0741-3335" },
+  { "name": "Fusion Engineering and Design", "type": "rss", "core_topics": ["fusion_development", "tritium_fuel_cycle"], "openalex_issn": "0920-3796", "rss": "https://rss.sciencedirect.com/publication/science/09203796" },
+  { "name": "Nuclear Materials and Energy", "type": "rss", "core_topics": ["tritium_fuel_cycle"], "openalex_issn": "2352-1791", "rss": "https://rss.sciencedirect.com/publication/science/23521791" },
+  { "name": "Journal of Nuclear Materials", "type": "rss", "openalex_issn": "0022-3115", "rss": "https://rss.sciencedirect.com/publication/science/00223115" },
+  { "name": "Physics of Plasmas (AIP)", "type": "rss", "core_topics": ["fusion_modeling"], "rss": "https://pubs.aip.org/rss/site_1000029/1000017.xml" },
+
+  { "name": "Nature — Fusion", "type": "rss", "kind": "news", "topics": ["fusion_development"], "rss": "https://www.nature.com/subjects/nuclear-fusion-and-fission.rss" },
+  { "name": "Fusion Industry Association", "type": "rss", "kind": "news", "topics": ["fusion_development"], "rss": "https://www.fusionindustryassociation.org/feed/" },
+  { "name": "World Nuclear News", "type": "rss", "kind": "news", "topics": ["fusion_development"], "rss": "https://world-nuclear-news.org/rss" }
+]

@@ -121,6 +121,47 @@ def build_weekly_digest(date_str: str, weekly_reports: list[tuple]) -> str:
     return "\n".join(lines).strip()
 
 
+def build_papers_digest(date_str: str, paper_reports: list[tuple]) -> str:
+    """
+    Build a concise Chinese digest of the weekly paper report for Telegram.
+
+    The paper template emits H2 sections in a fixed order (found by position,
+    so translated headers don't matter):
+        0: Highlights  1: Paper Digest  2: Research Trends & Analysis
+        3: Compared with Last Week  4: Predictions & What to Watch
+
+    Args:
+        paper_reports: List of (topic_name, item_count, english_report, chinese_report).
+    """
+    lines = [f"\U0001f4da 每周论文速递 · {date_str}", ""]
+
+    for topic_name, count, english, chinese in paper_reports:
+        sections = _split_h2_sections(chinese)
+        lines.append(f"【{topic_name}】({count} 篇)")
+
+        # 0: Highlights — one line per item: original title, then its link. Taken
+        # from the English report, since the translator renders titles inconsistently.
+        english_sections = _split_h2_sections(english)
+        if english_sections:
+            for title, url in re.findall(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", english_sections[0][1])[:5]:
+                lines.append(f"• {title}")
+                lines.append(f"  {url}")
+
+        # 4: Predictions — first sentence of the first three bullets, links
+        # reduced to their text
+        if len(sections) > 4:
+            header, body = sections[4]
+            body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body).replace("**", "")
+            lines.append(f"🔭 {header}")
+            for line in _trim_lines(body, 3).splitlines():
+                end = re.search(r"[。！？]|[.!?](?=\s|$)", line)
+                lines.append(line[: end.end()] if end else line[:150])
+
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 def _extract_top_stories(md_content: str, n: int = 3) -> list[tuple[str, str]]:
     """Extract top N stories (title, first-sentence summary) from the Top News section."""
     match = re.search(
