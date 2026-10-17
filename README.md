@@ -92,7 +92,9 @@ Edit `questions.md` and add your question. It will be answered in the next run a
 
 Two wrapper scripts handle scheduling. Both locate the repo from their own path and default to `python3` on `PATH`; set `PYTHON_BIN` to point at a specific interpreter (conda/venv).
 
-- **`scripts/run_cron.sh`** — the daily pipeline. Idempotent: it skips if every topic already has a report for today, and fills in missing topics otherwise, so re-runs never double-spend on API calls.
+- **`scripts/run_cron.sh`** — the daily pipeline. Idempotent: it skips if every topic already has a report for today (and, on Fridays, the weekly summary exists), fills in missing topics otherwise, and runs `run_workflow.py --weekly-only` when only Friday's weekly summary is missing — so re-runs never double-spend on API calls.
+
+Both `run_cron.sh` and `papers_cron.sh` first wait up to 30 minutes for the network (`scripts/wait_for_network.sh`; right after a wake it is often not up yet) and exit without API calls if it stays down. Inside a run, a topic that fails (e.g. a dropped connection) is retried 3 times and then skipped, keeping the others. Because the wrappers are idempotent, a second launchd slot later in the day is a cheap safety net: it only does work if the first run failed.
 - **`scripts/alert_cron.sh`** — near-real-time headline alerts pushed to Telegram (no Claude API calls). Deduplicates via `output/state/seen_urls.json`.
 
 ### Linux / cron
@@ -124,13 +126,18 @@ macOS `cron` silently skips jobs if the machine is asleep at the scheduled minut
         <key>PYTHON_BIN</key>
         <string>/path/to/python3</string>
     </dict>
+    <!-- 17:25 plus a 20:25 retry slot (a no-op when 17:25 succeeded) -->
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>17</integer>
-        <key>Minute</key>
-        <integer>25</integer>
-    </dict>
+    <array>
+        <dict>
+            <key>Hour</key><integer>17</integer>
+            <key>Minute</key><integer>25</integer>
+        </dict>
+        <dict>
+            <key>Hour</key><integer>20</integer>
+            <key>Minute</key><integer>25</integer>
+        </dict>
+    </array>
     <key>RunAtLoad</key>
     <false/>
 </dict>
@@ -144,14 +151,26 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.newscollecto
 
 ### Weekly paper report (launchd)
 
-`scripts/papers_cron.sh` runs `run_papers.py` and skips if a report already exists for the current ISO week. Use the plist above with a new `Label` (e.g. `com.example.newscollector.papers`), `scripts/papers_cron.sh` in `ProgramArguments`, `logs/papers.launchd.log` for output, and a weekly `StartCalendarInterval`:
+`scripts/papers_cron.sh` runs `run_papers.py` and skips if a report already exists for the current ISO week. Use the plist above with a new `Label` (e.g. `com.example.newscollector.papers`), `scripts/papers_cron.sh` in `ProgramArguments`, `logs/papers.launchd.log` for output, and a weekly `StartCalendarInterval` with retry slots (skipped once the week's report exists; `run_papers.py` writes no report and exits 1 if no source returned anything):
 ```xml
 <key>StartCalendarInterval</key>
-<dict>
-    <key>Weekday</key><integer>6</integer>   <!-- Saturday -->
-    <key>Hour</key><integer>9</integer>
-    <key>Minute</key><integer>0</integer>
-</dict>
+<array>
+    <dict>
+        <key>Weekday</key><integer>6</integer>   <!-- Saturday 09:00 -->
+        <key>Hour</key><integer>9</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <dict>
+        <key>Weekday</key><integer>6</integer>   <!-- Saturday 15:00 retry -->
+        <key>Hour</key><integer>15</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+    <dict>
+        <key>Weekday</key><integer>0</integer>   <!-- Sunday 09:00 retry -->
+        <key>Hour</key><integer>9</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+</array>
 ```
 
 ## Project Structure

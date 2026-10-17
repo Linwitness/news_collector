@@ -28,6 +28,10 @@ if [ -n "$done_this_week" ]; then
     echo "[papers_cron] $(date '+%Y-%m-%d %H:%M') — already done this week ($done_this_week); skipping." >> logs/papers.log
     exit 0
 fi
+
+source scripts/wait_for_network.sh
+wait_for_network logs/papers.log papers_cron || exit 1
+
 echo "[papers_cron] $(date '+%Y-%m-%d %H:%M') — running." >> logs/papers.log
 
 $PYTHON scripts/run_papers.py >> logs/papers.log 2>&1

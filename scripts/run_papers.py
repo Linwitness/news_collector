@@ -69,6 +69,11 @@ def main():
 
     print("Step 1: Fetching papers …")
     candidates = fetch_all_papers(BASE_DIR, fresh=fresh)
+    if not any(candidates.values()):
+        # Every source failed or returned nothing (e.g. no network). Write no
+        # report, so papers_cron.sh's next slot this week tries again.
+        print("\nERROR: no items fetched from any source (network?) — no report written.")
+        sys.exit(1)
 
     print("\nStep 2: Selecting relevant papers per topic …")
     selected = {}

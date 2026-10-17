@@ -8,6 +8,7 @@ Outputs output/weekly/weekly_summary_{YYYYMMDD}.md
 import json
 import os
 import glob
+import time
 from datetime import datetime
 
 from llm import LLM, create, get_llm
@@ -137,6 +138,21 @@ Translate section headers too. Keep URL hrefs as-is but translate anchor text.
     return create(llm, prompt, translation=True)
 
 
+def _weekly_for_topic(llm: LLM, prompt: str) -> tuple[str, str]:
+    """Return (english_report, chinese_report) for one topic's weekly prompt."""
+    print(f"    Calling {llm.provider} ({llm.model}) …")
+    # One retry if sections are missing; after that keep it with a warning
+    # (raising here would drop this topic's weekly summary).
+    for attempt in (1, 2):
+        english_report, missing = check_weekly(create(llm, prompt))
+        if not missing:
+            break
+        print(f"    WARNING: missing sections {missing} (attempt {attempt}/2)")
+
+    print(f"    Translating to Chinese ({llm.translation_model}) …")
+    return english_report, _translate_to_chinese(llm, english_report)
+
+
 def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[tuple]:
     """Generate weekly summaries for all topics.
 
@@ -169,17 +185,26 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
 
         prompt = build_weekly_prompt(topic, daily_contents, last_weekly, date_str)
 
-        print(f"    Calling {llm.provider} ({llm.model}) …")
-        # One retry if sections are missing; after that keep it with a warning
-        # (raising here would drop every topic's weekly summary).
-        for attempt in (1, 2):
-            english_report, missing = check_weekly(create(llm, prompt))
-            if not missing:
+        # Retry transient failures (a connection reset on 2026-10-16 lost the
+        # whole weekly); if a topic still fails, skip it and keep the others.
+        result = None
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = _weekly_for_topic(llm, prompt)
                 break
-            print(f"    WARNING: missing sections {missing} (attempt {attempt}/2)")
-
-        print(f"    Translating to Chinese ({llm.translation_model}) …")
-        chinese_report = _translate_to_chinese(llm, english_report)
+            except Exception as e:
+                if attempt < max_attempts:
+                    delay = 20 * attempt  # 20s, 40s
+                    print(f"    WARNING: weekly for '{topic['name']}' failed "
+                          f"(attempt {attempt}/{max_attempts}): {e} — retrying in {delay}s")
+                    time.sleep(delay)
+                else:
+                    print(f"    ERROR: weekly for '{topic['name']}' failed "
+                          f"after {max_attempts} attempts: {e} — skipping this topic")
+        if result is None:
+            continue
+        english_report, chinese_report = result
 
         combined_sections.append(english_report + "\n\n---\n---\n\n" + chinese_report)
         weekly_reports.append((topic["name"], english_report, chinese_report))
@@ -190,7 +215,7 @@ def generate_weekly(base_dir: str, topics: list[dict], settings: dict) -> list[t
             f.write("\n\n---\n\n".join(combined_sections))
         print(f"  Weekly summary written: {output_path}")
     else:
-        print("  No weekly summary generated (no daily files found).")
+        print("  No weekly summary generated (no daily files, or every topic failed).")
 
     return weekly_reports
 

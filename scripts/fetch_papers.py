@@ -135,21 +135,34 @@ def _openalex_abstract(inverted: dict) -> str:
 
 
 def _openalex_search(query: str, cutoff: datetime, max_results: int) -> list[dict]:
-    """Every work matching `query` since the cutoff, up to max_results (paged)."""
-    results, cursor = [], "*"
-    while cursor and len(results) < max_results:
+    """Every work matching `query` since the cutoff, up to max_results (paged).
+
+    Uses page= rather than cursor=: since 2026-10 OpenAlex refuses cursor
+    paging (401) without an API key. A failed later page keeps what was
+    already fetched instead of losing the whole query.
+    """
+    results, page_no = [], 1
+    while len(results) < max_results:
         time.sleep(1)
-        data = _get(OPENALEX_API, {
-            "filter": f"from_publication_date:{cutoff:%Y-%m-%d},"
-                      f"title_and_abstract.search:{query}",
-            "per-page": 100,
-            "cursor": cursor,
-            "select": "doi,title,publication_date,authorships,"
-                      "primary_location,abstract_inverted_index,type",
-        }).json()
+        try:
+            data = _get(OPENALEX_API, {
+                "filter": f"from_publication_date:{cutoff:%Y-%m-%d},"
+                          f"title_and_abstract.search:{query}",
+                "per-page": 100,
+                "page": page_no,
+                "select": "doi,title,publication_date,authorships,"
+                          "primary_location,abstract_inverted_index,type",
+            }).json()
+        except Exception as e:
+            if not results:
+                raise
+            print(f"    WARNING: OpenAlex page {page_no} failed, keeping {len(results)} results: {e}")
+            break
         page = data.get("results", [])
         results += page
-        cursor = data.get("meta", {}).get("next_cursor") if page else None
+        if len(page) < 100 or len(results) >= data.get("meta", {}).get("count", 0):
+            break
+        page_no += 1
     return results[:max_results]
 
 

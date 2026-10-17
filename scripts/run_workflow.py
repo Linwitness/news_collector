@@ -3,6 +3,7 @@ run_workflow.py — Main orchestrator for the news collector pipeline.
 
 Run manually:
     python3 scripts/run_workflow.py
+    python3 scripts/run_workflow.py --weekly-only   # just the weekly summary + its digest
 
 Or on a schedule via scripts/run_cron.sh (see README "Scheduling").
 """
@@ -63,7 +64,33 @@ def is_friday() -> bool:
     return datetime.now().weekday() == 4  # Monday=0, Friday=4
 
 
+def run_weekly(settings: dict, topics: list[dict], date_str: str) -> None:
+    """Write the weekly summary and send its Telegram digest."""
+    try:
+        weekly_reports = generate_weekly(BASE_DIR, topics, settings)
+        if weekly_reports:
+            try:
+                from notify import build_weekly_digest, send_telegram
+                weekly_digest = build_weekly_digest(date_str, weekly_reports)
+                send_telegram(weekly_digest, BASE_DIR)
+                print("  Weekly Telegram digest sent.")
+            except Exception as e:
+                print(f"  WARNING: weekly Telegram digest failed: {e}")
+    except Exception as e:
+        print(f"  ERROR generating weekly summary: {e}")
+
+
 def main():
+    if "--weekly-only" in sys.argv:
+        # Catch-up path (run_cron.sh): today's dailies exist but the weekly doesn't.
+        print(f"\n{'='*60}")
+        print(f"Weekly summary only — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        print(f"{'='*60}\n")
+        run_weekly(load_settings(BASE_DIR), load_topics(BASE_DIR),
+                   datetime.now().strftime("%B %d, %Y"))
+        print(f"\n{'='*60}\nDone.\n{'='*60}\n")
+        return
+
     print(f"\n{'='*60}")
     print(f"News Collector — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
@@ -169,18 +196,7 @@ def main():
     # 5. Weekly summary (Fridays only)
     if is_friday():
         print("\nStep 4: Today is Friday — generating weekly summary …")
-        try:
-            weekly_reports = generate_weekly(BASE_DIR, topics, settings)
-            if weekly_reports:
-                try:
-                    from notify import build_weekly_digest, send_telegram
-                    weekly_digest = build_weekly_digest(date_str, weekly_reports)
-                    send_telegram(weekly_digest, BASE_DIR)
-                    print("  Weekly Telegram digest sent.")
-                except Exception as e:
-                    print(f"  WARNING: weekly Telegram digest failed: {e}")
-        except Exception as e:
-            print(f"  ERROR generating weekly summary: {e}")
+        run_weekly(settings, topics, date_str)
     else:
         day_name = datetime.now().strftime("%A")
         print(f"\nStep 4: Skipping weekly summary (today is {day_name}, not Friday).")

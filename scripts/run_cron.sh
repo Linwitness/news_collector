@@ -23,9 +23,25 @@ print(",".join(missing))
 PY
 )"
 
-if [ -z "$missing" ]; then
+# On Fridays the weekly summary is part of the job too: if the dailies are done
+# but the weekly failed (as on 2026-10-16), the retry slot runs just the weekly.
+weekly_missing=""
+if [ "$(date +%u)" = "5" ] && [ ! -f "output/weekly/weekly_summary_${today}.md" ]; then
+    weekly_missing="yes"
+fi
+
+if [ -z "$missing" ] && [ -z "$weekly_missing" ]; then
     echo "[run_cron] $(date '+%Y-%m-%d %H:%M') — all topics for $today already done; skipping." >> logs/cron.log
     exit 0
+fi
+
+source scripts/wait_for_network.sh
+wait_for_network logs/cron.log run_cron || exit 1
+
+if [ -z "$missing" ]; then
+    echo "[run_cron] $(date '+%Y-%m-%d %H:%M') — dailies done; running missing weekly summary." >> logs/cron.log
+    $PYTHON scripts/run_workflow.py --weekly-only >> logs/cron.log 2>&1
+    exit $?
 fi
 echo "[run_cron] $(date '+%Y-%m-%d %H:%M') — running; missing topics: ${missing}" >> logs/cron.log
 
