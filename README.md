@@ -78,7 +78,7 @@ python3 scripts/fetch_papers.py          # fetch only: show candidates per topic
 - **Topics** — `config/paper_topics.json`: `name`, a `description` of the scope (used by the LLM), `keywords` (scoring), `min_score`, an `arxiv_query`, `queries` for OpenAlex/OSTI, and optional `require` groups (an item must match one keyword from each group).
 - **Sources** — `config/paper_sources.json`: arXiv, OpenAlex (most journals), OSTI (DOE reports), journal RSS feeds (Nuclear Fusion, PPCF, Fusion Eng. Des., Nucl. Mater. Energy, J. Nucl. Mater., Physics of Plasmas), and fusion news feeds limited to the development topic (`"topics"`, `"kind": "news"`). An RSS source can set `core_topics` (its papers count as on-topic even without keyword hits) and `openalex_issn` (fill missing abstracts from OpenAlex — ScienceDirect feeds carry titles only).
 - **Pipeline** — fetch the last `papers.lookback_days`, drop corrections/retractions, merge preprint/journal/dataset versions of a work, skip papers already reported (`output/state/seen_papers.json`), keyword-score, then: an LLM triage per topic (thinking on, to screen out pseudo-science) picks up to `papers.max_papers_per_topic`, each paper is kept in a single topic — one whose `milestones` description the triage matched it to (e.g. a record result goes to Fusion Energy Development and into its Highlights), else its best-scoring topic — and a report call writes `papers.highlights_per_topic` Highlights, a Paper Digest of every other selected paper, Research Trends & Analysis, Compared with Last Week, and checkable Predictions. Links are checked against the fetched items; anything else is removed. A topic's optional `report_guidance` is passed to the report prompt.
-- **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest with the highlight links.
+- **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest: per topic, a 2–4 sentence summary of each Highlights paper with its link right after it, then the predictions (trimmed so the summaries are at least ¾ of the text).
 
 ### Planned improvements
 
@@ -95,14 +95,14 @@ Two wrapper scripts handle scheduling. Both locate the repo from their own path 
 - **`scripts/run_cron.sh`** — the daily pipeline. Idempotent: it skips if every topic already has a report for today (and, on Fridays, the weekly summary exists), fills in missing topics otherwise, and runs `run_workflow.py --weekly-only` when only Friday's weekly summary is missing — so re-runs never double-spend on API calls.
 
 Both `run_cron.sh` and `papers_cron.sh` first wait up to 30 minutes for the network (`scripts/wait_for_network.sh`; right after a wake it is often not up yet) and exit without API calls if it stays down. Inside a run, a topic that fails (e.g. a dropped connection) is retried 3 times and then skipped, keeping the others. Because the wrappers are idempotent, a second launchd slot later in the day is a cheap safety net: it only does work if the first run failed.
-- **`scripts/alert_cron.sh`** — near-real-time headline alerts pushed to Telegram (no Claude API calls). Deduplicates via `output/state/seen_urls.json`.
+- **`scripts/alert_cron.sh`** — near-real-time headline alerts pushed to Telegram (no LLM API calls), hourly 06:00–23:00. Each alert is one line, `🔔 【Topic】Headline · Source`, where the headline is a hyperlink and link previews are off. The 06:00 poll looks back `alert_overnight_lookback_hours` (8) to catch overnight news. Deduplicates via `output/state/seen_urls.json`.
 
 ### Linux / cron
 
 ```
 PYTHON_BIN=/path/to/python3
 25 17 * * * /path/to/news_collector/scripts/run_cron.sh
-0 * * * *   /path/to/news_collector/scripts/alert_cron.sh
+0 6-23 * * * /path/to/news_collector/scripts/alert_cron.sh
 ```
 
 ### macOS / launchd (recommended for the daily job)

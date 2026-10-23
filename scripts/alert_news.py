@@ -1,8 +1,11 @@
 """
 alert_news.py — Near-real-time news alerts between daily deep-dive runs.
 
-Polls RSS feeds (cron every 30 min), filters new high-score articles, and
-pushes raw headlines to Telegram. Makes zero Claude API calls.
+Polls RSS feeds (cron hourly, 06:00-23:00), filters new high-score articles,
+and pushes them to Telegram as one line each: the headline is an HTML hyperlink
+and link previews are off, so items stay short. Makes zero LLM API calls.
+The first poll of the day (alert_start_hour) looks back
+alert_overnight_lookback_hours so overnight headlines are not missed.
 
 State is persisted in output/state/seen_urls.json so the same article is
 never alerted twice. Shares the lock and state file with run_workflow.py.
@@ -10,6 +13,7 @@ never alerted twice. Shares the lock and state file with run_workflow.py.
 
 import argparse
 import fcntl
+import html
 import json
 import os
 import sys
@@ -30,6 +34,8 @@ DEFAULTS = {
     "alert_score_threshold": 2,
     "alert_state_path": "output/state/seen_urls.json",
     "alert_seen_ttl_days": 7,
+    "alert_start_hour": 6,
+    "alert_overnight_lookback_hours": 8,
 }
 
 
@@ -157,9 +163,11 @@ def collect_candidates(providers, topics, lookback_hours, threshold):
 
 
 def format_alert(article: dict) -> str:
+    """One line in Telegram HTML: the headline links to the article."""
     return (
-        f"🔔 【{article['topic_name']}】{article['title']}\n"
-        f"{article['source']} · {article['link']}"
+        f"🔔 【{html.escape(article['topic_name'])}】"
+        f"<a href=\"{html.escape(article['link'], quote=True)}\">{html.escape(article['title'])}</a>"
+        f" · {html.escape(article['source'])}"
     )
 
 
@@ -168,6 +176,10 @@ def run(dry_run: bool = False) -> int:
     providers, topics, settings = load_config(BASE_DIR)
 
     lookback = settings.get("alert_lookback_hours", DEFAULTS["alert_lookback_hours"])
+    # Cron polls only 06:00-23:00; the first poll of the day covers the night.
+    if datetime.now().hour == settings.get("alert_start_hour", DEFAULTS["alert_start_hour"]):
+        lookback = settings.get("alert_overnight_lookback_hours",
+                                DEFAULTS["alert_overnight_lookback_hours"])
     threshold = settings.get("alert_score_threshold", DEFAULTS["alert_score_threshold"])
     ttl = settings.get("alert_seen_ttl_days", DEFAULTS["alert_seen_ttl_days"])
 
@@ -202,7 +214,7 @@ def run(dry_run: bool = False) -> int:
             return 0
 
         try:
-            send_telegram(message, BASE_DIR)
+            send_telegram(message, BASE_DIR, html_mode=True, preview=False)
         except Exception as e:
             print(f"  ERROR sending Telegram: {e}")
             # Do not mark as seen on failure, so we retry next cycle.

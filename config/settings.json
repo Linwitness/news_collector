@@ -35,6 +35,8 @@
   "alert_score_threshold": 2,
   "alert_state_path": "output/state/seen_urls.json",
   "alert_seen_ttl_days": 7,
+  "alert_start_hour": 6,
+  "alert_overnight_lookback_hours": 8,
   "papers": {
     "lookback_days": 7,
     "candidates_per_topic": 150,

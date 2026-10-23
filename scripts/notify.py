@@ -4,8 +4,10 @@ notify.py — Build a short news digest and send it via Telegram.
 No third-party packages required (uses urllib.request from stdlib).
 """
 
+import html
 import os
 import re
+import urllib.error
 import urllib.request
 import urllib.parse
 import json
@@ -121,9 +123,43 @@ def build_weekly_digest(date_str: str, weekly_reports: list[tuple]) -> str:
     return "\n".join(lines).strip()
 
 
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+
+
+def _plain(text: str) -> str:
+    """Markdown to plain text: links become their text, bold/italic markers go."""
+    return _MD_LINK.sub(r"\1", text).replace("**", "").replace("*", "").strip()
+
+
+def _first_sentence(line: str, limit: int = 150) -> str:
+    end = re.search(r"[。！？]|[.!?](?=\s|$)", line)
+    return line[: end.end()] if end else line[:limit]
+
+
+def _highlight_items(body: str) -> list[tuple[str, str, str]]:
+    """(title, summary, url) for each `### N. [Title](URL)` item of a Highlights
+    section. The title prefers the translator's Chinese rendering in
+    parentheses after the link; the summary is the text below the author line."""
+    items = []
+    for block in re.split(r"(?m)^###\s+", body)[1:]:
+        lines = block.strip().splitlines()
+        link = _MD_LINK.search(lines[0])
+        if not link:
+            continue
+        rest = lines[0][link.end():].strip()
+        zh_title = re.match(r"^[（(](.+)[)）]$", rest)
+        title = zh_title.group(1) if zh_title else link.group(1)
+        text = [ln for ln in lines[1:] if ln.strip() and not ln.strip().startswith("*")]
+        items.append((title, _plain(" ".join(text)), link.group(2)))
+    return items
+
+
 def build_papers_digest(date_str: str, paper_reports: list[tuple]) -> str:
     """
-    Build a concise Chinese digest of the weekly paper report for Telegram.
+    Build the Chinese Telegram digest of the weekly paper report: for each topic,
+    a short summary of every Highlights paper with its link right after it, then
+    the predictions. Predictions are capped so the paper summaries make up at
+    least 3/4 of the text.
 
     The paper template emits H2 sections in a fixed order (found by position,
     so translated headers don't matter):
@@ -137,25 +173,42 @@ def build_papers_digest(date_str: str, paper_reports: list[tuple]) -> str:
 
     for topic_name, count, english, chinese in paper_reports:
         sections = _split_h2_sections(chinese)
-        lines.append(f"【{topic_name}】({count} 篇)")
-
-        # 0: Highlights — one line per item: original title, then its link. Taken
-        # from the English report, since the translator renders titles inconsistently.
         english_sections = _split_h2_sections(english)
-        if english_sections:
-            for title, url in re.findall(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", english_sections[0][1])[:5]:
-                lines.append(f"• {title}")
-                lines.append(f"  {url}")
+        en_items = _highlight_items(english_sections[0][1]) if english_sections else []
+        items = _highlight_items(sections[0][1]) if sections else []
+        if not items:
+            items = en_items  # translation lost the structure: fall back to English
+        elif len(items) == len(en_items):
+            # The English report's links are the checked ones (fix_links).
+            items = [(t, s, en[2]) for (t, s, _), en in zip(items, en_items)]
 
-        # 4: Predictions — first sentence of the first three bullets, links
-        # reduced to their text
+        lines.append(f"【{topic_name}】({count} 篇)")
+        summary_chars = 0
+        for i, (title, summary, url) in enumerate(items, 1):
+            lines.append(f"{i}. {title}")
+            if summary:
+                lines.append(summary)
+            lines.append(f"🔗 {url}")
+            lines.append("")
+            summary_chars += len(title) + len(summary)
+
+        # 4: Predictions — first sentence of each bullet, within a budget of
+        # 1/3 of the summary text (so summaries are >= 3/4 of the total).
         if len(sections) > 4:
             header, body = sections[4]
-            body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body).replace("**", "")
-            lines.append(f"🔭 {header}")
-            for line in _trim_lines(body, 3).splitlines():
-                end = re.search(r"[。！？]|[.!?](?=\s|$)", line)
-                lines.append(line[: end.end()] if end else line[:150])
+            budget = summary_chars // 3
+            kept = []
+            for line in _plain(body).splitlines():
+                line = line.strip().lstrip("-•").strip()
+                if not line:
+                    continue
+                sentence = _first_sentence(line)
+                if kept and sum(map(len, kept)) + len(sentence) > budget:
+                    break
+                kept.append(sentence)
+            if kept:
+                lines.append(f"🔭 {header}")
+                lines += [f"- {k}" for k in kept]
 
         lines.append("")
 
@@ -288,13 +341,26 @@ def _chunk_message(text: str, limit: int = 4000) -> list[str]:
     return [c for c in chunks if c]
 
 
-def send_telegram(message: str, base_dir: str = None) -> None:
+def _html_to_plain(text: str) -> str:
+    """Telegram-HTML message to plain text: <a href="u">t</a> -> "t u", entities unescaped."""
+    text = re.sub(r'<a href="([^"]*)">(.*?)</a>',
+                  lambda m: f"{m.group(2)} {m.group(1)}", text)
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
+def send_telegram(message: str, base_dir: str = None, html_mode: bool = False,
+                  preview: bool = True) -> None:
     """
     Send a message via Telegram bot.
 
     Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from environment variables.
     Long messages are split into multiple sends to stay under Telegram's
     4096-character per-message limit.
+
+    html_mode=True sends with parse_mode HTML (e.g. <a href="...">title</a>
+    hyperlinks); if Telegram rejects a chunk's markup (HTTP 400), that chunk is
+    resent as plain text so nothing is lost. preview=False turns off link
+    preview cards.
     Raises an exception if credentials are missing or any request fails.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -309,12 +375,13 @@ def send_telegram(message: str, base_dir: str = None) -> None:
     chunks = _chunk_message(message)
     total = len(chunks)
 
-    for idx, chunk in enumerate(chunks, 1):
-        text = chunk if total == 1 else (chunk if idx == 1 else f"(续 {idx}/{total})\n{chunk}")
-        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+    def post(fields: dict, idx: int) -> None:
+        payload = {"chat_id": chat_id, **fields}
+        if not preview:
+            payload["link_preview_options"] = {"is_disabled": True}
         req = urllib.request.Request(
             url,
-            data=payload,
+            data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
@@ -322,3 +389,16 @@ def send_telegram(message: str, base_dir: str = None) -> None:
             result = json.loads(resp.read().decode("utf-8"))
             if not result.get("ok"):
                 raise RuntimeError(f"Telegram API error (chunk {idx}/{total}): {result}")
+
+    for idx, chunk in enumerate(chunks, 1):
+        text = chunk if total == 1 else (chunk if idx == 1 else f"(续 {idx}/{total})\n{chunk}")
+        if not html_mode:
+            post({"text": text}, idx)
+            continue
+        try:
+            post({"text": text, "parse_mode": "HTML"}, idx)
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            print(f"  WARNING: Telegram rejected HTML (chunk {idx}/{total}); resending as plain text")
+            post({"text": _html_to_plain(text)}, idx)
