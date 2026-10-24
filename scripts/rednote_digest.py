@@ -388,12 +388,32 @@ def pick_significant(notes: list, settings: dict, significance: str) -> list:
     return picks
 
 
+def _posted(ms) -> str:
+    """Post time in local time with its age, e.g. '10-23 14:05（3小时前）'; '' if unknown."""
+    if not ms:
+        return ""
+    t = datetime.fromtimestamp(ms / 1000)
+    now = datetime.now()
+    stamp = t.strftime("%m-%d %H:%M" if t.year == now.year else "%Y-%m-%d %H:%M")
+    mins = int((now - t).total_seconds() // 60)
+    if mins < 60:
+        age = "刚刚"
+    elif mins < 48 * 60:
+        age = f"{mins // 60}小时前"
+    else:
+        age = f"{mins // (24 * 60)}天前"
+    return f"{stamp}（{age}）"
+
+
 def format_item(note: dict, summary: str) -> str:
-    """Telegram HTML: hyperlinked title · author, then the paragraph."""
+    """Telegram HTML: hyperlinked title · author · post time, then the paragraph."""
     title = note.get("title") or note.get("desc", "")[:30] or "（无标题）"
     link = NOTE_LINK.format(id=note["id"])
+    posted = _posted(note.get("time"))
     return (f"📕 <a href=\"{html.escape(link, quote=True)}\">{html.escape(title)}</a>"
-            f" · {html.escape(note.get('author', ''))}\n{html.escape(summary)}")
+            f" · {html.escape(note.get('author', ''))}"
+            + (f" · {html.escape(posted)}" if posted else "")
+            + f"\n{html.escape(summary)}")
 
 
 def warn_once(reason: str, state_dir: str, dry_run: bool) -> None:

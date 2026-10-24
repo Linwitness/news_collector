@@ -34,7 +34,7 @@ Separately, **`scripts/alert_news.py`** (run hourly 06:00–23:00 via `scripts/a
 - screens up to `rednote.screen_per_run` unseen cards by title in one LLM call (`screen_titles`);
 - opens only the picks, in feed order and at most `rednote.notes_per_run`, by clicking each card and going back. Only about 18 cards are rendered, so it scrolls down to reach later ones. It reads `window.__INITIAL_STATE__` (Vue refs; values in `._value`; a note is fully loaded once `time` is set);
 - makes one more LLM call (base settings, thinking off), which returns JSON `{id, summary}` for the notes matching `rednote.significance`;
-- formats each one as a hyperlinked title plus a Chinese paragraph. Links are built from note ids (`/discovery/item/{id}`, which works without an xsec token).
+- formats each one as a hyperlinked title · author · post time (`_posted`: local time plus age), plus a Chinese paragraph. Links are built from note ids (`/discovery/item/{id}`, which works without an xsec token).
 
 Details:
 - It uses Playwright's own Chromium (`channel="chromium"`), not the system Chrome. mambaforge is Python 3.9, which caps Playwright at 1.60, and that hangs on Chrome 156.

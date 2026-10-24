@@ -86,7 +86,7 @@ python3 scripts/fetch_papers.py          # fetch only: show candidates per topic
 
 ## rednote Digest
 
-Every hour (06:00–23:00) the news alert also reads new notes from your rednote (Xiaohongshu) home feed. It adds the timely news among them to the same Telegram message, after the headlines: a hyperlinked title, then a 1–3 sentence Chinese summary. It adds nothing in an hour with no rednote news.
+Every hour (06:00–23:00) the news alert also reads new notes from your rednote (Xiaohongshu) home feed. It adds the timely news among them to the same Telegram message, after the headlines: a hyperlinked title with the author and post time (e.g. `10-23 14:05（3小时前）`, so stale posts stand out), then a 1–3 sentence Chinese summary. It adds nothing in an hour with no rednote news.
 
 ```bash
 python3 -m pip install playwright
