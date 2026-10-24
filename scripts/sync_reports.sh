@@ -1,6 +1,6 @@
 #!/bin/bash
 # Mirror the Raspberry Pi's output/ (reports and state) into this checkout, so the
-# reports can be read on the Mac. Run every 30 min by the launchd agent
+# reports can be read on the Mac. Run every 60 min by the launchd agent
 # com.lin.newscollector.reportsync (see README "Run on a Raspberry Pi").
 # Tries the Tailscale name first (works anywhere), then the LAN name.
 cd "$(dirname "$0")/.."

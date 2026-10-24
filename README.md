@@ -118,7 +118,7 @@ On first boot, `newspi-setup.service` runs `deploy/pi/setup.sh`, retrying every 
 
 Then `ssh lin@newspi.local` (or `ssh lin@newspi` from anywhere once both machines are on Tailscale). Turn the Mac's jobs off (crontab line, `launchctl bootout` of the agents) so only one machine sends.
 
-To read the reports on the Mac, `scripts/sync_reports.sh` mirrors the Pi's `output/` into this checkout with rsync over SSH. It tries `newspi` (Tailscale) first, then `newspi.local`. A LaunchAgent runs it every 30 minutes, with the same plist layout as above, using `StartInterval` 1800 and `RunAtLoad`.
+To read the reports on the Mac, `scripts/sync_reports.sh` mirrors the Pi's `output/` into this checkout with rsync over SSH. It tries `newspi` (Tailscale) first, then `newspi.local`. A LaunchAgent runs it every 60 minutes, with the same plist layout as above, using `StartInterval` 3600 and `RunAtLoad`.
 
 ## Ask a One-Off Question
 

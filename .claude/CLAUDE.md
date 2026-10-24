@@ -50,7 +50,7 @@ Details:
 - On the Pi, `REDNOTE_BROWSER_EXECUTABLE` (set in the crontab) switches rednote to the system Chromium when Playwright's build doesn't work.
 - `rednote_digest.py --export-state` / `--import-state` move the rednote login between machines. A copied Chrome profile doesn't work, because macOS encrypts its cookies with the Keychain.
 - The Pi's `origin` uses HTTPS: it is pull-only, with no GitHub key. Update it with `git fetch && git reset --hard origin/main`.
-- On the Mac, `scripts/sync_reports.sh` (LaunchAgent `com.lin.newscollector.reportsync`, every 30 min) rsyncs the Pi's `output/` into the local `output/`. It includes `state/` on purpose, so the Mac could take over without re-sending.
+- On the Mac, `scripts/sync_reports.sh` (LaunchAgent `com.lin.newscollector.reportsync`, every 60 min) rsyncs the Pi's `output/` into the local `output/`. It includes `state/` on purpose, so the Mac could take over without re-sending.
 
 ## Scheduling wrappers
 
