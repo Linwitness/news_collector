@@ -1,0 +1,15 @@
+# News collector schedule on the Raspberry Pi (user lin; Linux cron, local time).
+# Installed by deploy/pi/setup.sh. Same slots as the Mac had; the wrappers'
+# idempotency guards make the retry slots no-ops after a success.
+SHELL=/bin/bash
+PYTHON_BIN=/home/lin/news_collector/.venv/bin/python
+#REDNOTE_BROWSER_EXECUTABLE=/usr/bin/chromium
+
+# Hourly headlines + rednote, 06:00-23:00
+0 6-23 * * * /home/lin/news_collector/scripts/alert_cron.sh
+# Daily reports (Fridays also the weekly summary), with a retry slot
+25 17,20 * * * /home/lin/news_collector/scripts/run_cron.sh
+# Weekly paper report: Saturday 09:00, retries Saturday 15:00 and Sunday 09:00
+0 9 * * 6 /home/lin/news_collector/scripts/papers_cron.sh
+0 15 * * 6 /home/lin/news_collector/scripts/papers_cron.sh
+0 9 * * 0 /home/lin/news_collector/scripts/papers_cron.sh

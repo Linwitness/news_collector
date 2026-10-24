@@ -44,5 +44,16 @@
     "highlights_per_topic": 5,
     "seen_ttl_days": 90,
     "state_path": "output/state/seen_papers.json"
+  },
+  "rednote": {
+    "enabled": true,
+    "url": "https://www.rednote.com/explore",
+    "screen_per_run": 30,
+    "notes_per_run": 10,
+    "profile_dir": "~/.news_collector/rednote_profile",
+    "state_path": "output/state/rednote_seen.json",
+    "seen_ttl_days": 7,
+    "headless": true,
+    "significance": "Timely news and events: real-world happenings, breaking or developing stories, policy and regulation changes, economic, market and price moves, public safety, notable announcements or launches. Not lifestyle, shopping or recommendation posts, ads, tutorials, celebrity gossip, games, memes or personal diaries."
   }
 }

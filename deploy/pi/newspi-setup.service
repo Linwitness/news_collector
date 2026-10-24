@@ -1,0 +1,16 @@
+[Unit]
+Description=News collector first-boot setup (deploy/pi/setup.sh)
+Wants=network-online.target
+After=network-online.target cloud-final.service
+ConditionPathExists=!/var/lib/newspi-setup.done
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /boot/firmware/newspi-setup.sh
+Restart=on-failure
+RestartSec=300
+TimeoutStartSec=5400
+
+[Install]
+WantedBy=multi-user.target

@@ -3,9 +3,12 @@ alert_news.py — Near-real-time news alerts between daily deep-dive runs.
 
 Polls RSS feeds (cron hourly, 06:00-23:00), filters new high-score articles,
 and pushes them to Telegram as one line each: the headline is an HTML hyperlink
-and link previews are off, so items stay short. Makes zero LLM API calls.
-The first poll of the day (alert_start_hour) looks back
+and link previews are off, so items stay short. The headlines themselves cost no
+LLM calls. The first poll of the day (alert_start_hour) looks back
 alert_overnight_lookback_hours so overnight headlines are not missed.
+
+When rednote.enabled is set, the same message also carries the rednote home-feed
+news from rednote_digest.collect() (headlines first, then rednote items).
 
 State is persisted in output/state/seen_urls.json so the same article is
 never alerted twice. Shares the lock and state file with run_workflow.py.
@@ -171,7 +174,7 @@ def format_alert(article: dict) -> str:
     )
 
 
-def run(dry_run: bool = False) -> int:
+def run(dry_run: bool = False, rednote: bool = True) -> int:
     _load_dotenv(BASE_DIR)
     providers, topics, settings = load_config(BASE_DIR)
 
@@ -201,11 +204,20 @@ def run(dry_run: bool = False) -> int:
         new_articles = [a for url, a in candidates.items() if url not in seen]
         print(f"  candidates: {len(candidates)}, new: {len(new_articles)}")
 
-        if not new_articles:
+        rednote_items, rednote_commit = [], (lambda: None)
+        if rednote and settings.get("rednote", {}).get("enabled", False):
+            try:
+                from rednote_digest import collect as collect_rednote
+                rednote_items, rednote_commit = collect_rednote(dry_run=dry_run)
+            except Exception as e:
+                print(f"  WARNING: rednote digest failed: {e}")
+
+        if not new_articles and not rednote_items:
+            rednote_commit()
             return 0
 
-        # Build combined message; send_telegram already chunks if needed.
-        message = "\n\n".join(format_alert(a) for a in new_articles)
+        # Headlines first, then rednote items; send_telegram already chunks if needed.
+        message = "\n\n".join([format_alert(a) for a in new_articles] + rednote_items)
 
         if dry_run:
             print("--- DRY RUN — would send ---")
@@ -224,7 +236,9 @@ def run(dry_run: bool = False) -> int:
         for a in new_articles:
             seen[a["link"]] = now
         save_seen(state_file, seen)
-        print(f"  sent {len(new_articles)} alert(s); state saved.")
+        rednote_commit()
+        print(f"  sent {len(new_articles)} alert(s) + {len(rednote_items)} rednote item(s); "
+              f"state saved.")
         return 0
 
 
@@ -232,8 +246,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Print would-be alerts without sending or updating state.")
+    parser.add_argument("--no-rednote", action="store_true",
+                        help="Skip the rednote part (RSS headlines only).")
     args = parser.parse_args()
-    sys.exit(run(dry_run=args.dry_run))
+    sys.exit(run(dry_run=args.dry_run, rednote=not args.no_rednote))
 
 
 if __name__ == "__main__":

@@ -84,6 +84,42 @@ python3 scripts/fetch_papers.py          # fetch only: show candidates per topic
 
 1. **Read selected papers in detail.** The report currently works from titles and abstracts only (and some journal items have no abstract). Fetch the full text (open-access PDF/HTML, e.g. arXiv or OpenAlex `open_access` links) for the selected papers, at least the Highlights, and base summaries, trends and predictions on methods, results and limitations rather than the abstract alone.
 
+## rednote Digest
+
+Every hour (06:00–23:00) the news alert also reads new notes from your rednote (Xiaohongshu) home feed. It adds the timely news among them to the same Telegram message, after the headlines: a hyperlinked title, then a 1–3 sentence Chinese summary. It adds nothing in an hour with no rednote news.
+
+```bash
+python3 -m pip install playwright
+python3 -m playwright install --no-shell chromium   # Playwright's own browser, ~150 MB
+python3 scripts/rednote_digest.py --login            # one-time: scan the QR code with the rednote app
+python3 scripts/rednote_digest.py --dry-run          # rednote part alone: print the notes and the message; send nothing
+```
+
+- **Login** — rednote's web login is QR code or SMS only, so there's no password to configure. `--login` opens a visible browser; after you scan, the session is kept in a browser profile outside the repo (`rednote.profile_dir`, default `~/.news_collector/rednote_profile`). It lasts a few weeks. When it expires, or rednote shows a verification page, the job sends one Telegram warning per day asking you to run `--login` again. It never tries to solve a captcha.
+- **Each run** loads the home feed headless and screens up to `rednote.screen_per_run` (30) unseen notes by title in one LLM call. It opens only the promising ones (at most `rednote.notes_per_run`, 10), the way a user would. A second LLM call picks the significant ones (`rednote.significance`) and summarizes them from the note text only. Screened notes are tracked in `output/state/rednote_seen.json`. Set `rednote.enabled` to `false` to turn the rednote part off.
+- **Caveat** — automated access is against rednote's terms. The job is low-volume, but there is some risk of a verification prompt or an account restriction.
+
+## Run on a Raspberry Pi
+
+An always-on Raspberry Pi avoids the laptop's sleep and charging gaps. `deploy/pi/` sets one up from a single SD card, with no monitor or keyboard:
+
+1. Flash Raspberry Pi OS Lite (64-bit) onto the card.
+2. Build a bundle: `news_collector/` (the working tree with `.env` and `output/`), plus `rednote_state.json` from `python3 scripts/rednote_digest.py --export-state rednote_state.json`.
+3. Run `WIFI_SSID=… WIFI_PASSWORD=… python3 deploy/pi/prepare_bootfs.py /Volumes/bootfs bundle.tar.gz`. This writes the cloud-init `user-data` (hostname `newspi`, user `lin` with your SSH key, key-only SSH) and `network-config`, and copies the setup files.
+4. Boot the Pi.
+
+On first boot, `newspi-setup.service` runs `deploy/pi/setup.sh`, retrying every 5 min until it succeeds. It:
+- installs packages and a venv;
+- installs Playwright Chromium, falling back to the system Chromium via `REDNOTE_BROWSER_EXECUTABLE`;
+- restores `.env`, `output/` and the rednote login, then deletes the bundle from the card;
+- installs `deploy/pi/crontab.txt`;
+- self-tests the LLM and feeds;
+- reports ✅ or ❌ to Telegram. The log is `/var/log/newspi-setup.log`, also copied to the card's boot partition.
+
+Then `ssh lin@newspi.local` (or `ssh lin@newspi` from anywhere once both machines are on Tailscale). Turn the Mac's jobs off (crontab line, `launchctl bootout` of the agents) so only one machine sends.
+
+To read the reports on the Mac, `scripts/sync_reports.sh` mirrors the Pi's `output/` into this checkout with rsync over SSH. It tries `newspi` (Tailscale) first, then `newspi.local`. A LaunchAgent runs it every 30 minutes, with the same plist layout as above, using `StartInterval` 1800 and `RunAtLoad`.
+
 ## Ask a One-Off Question
 
 Edit `questions.md` and add your question. It will be answered in the next run and then the file will be reset.
@@ -96,6 +132,7 @@ Two wrapper scripts handle scheduling. Both locate the repo from their own path 
 
 Both `run_cron.sh` and `papers_cron.sh` first wait up to 30 minutes for the network (`scripts/wait_for_network.sh`; right after a wake it is often not up yet) and exit without API calls if it stays down. Inside a run, a topic that fails (e.g. a dropped connection) is retried 3 times and then skipped, keeping the others. Because the wrappers are idempotent, a second launchd slot later in the day is a cheap safety net: it only does work if the first run failed.
 - **`scripts/alert_cron.sh`** — near-real-time headline alerts pushed to Telegram (no LLM API calls), hourly 06:00–23:00. Each alert is one line, `🔔 【Topic】Headline · Source`, where the headline is a hyperlink and link previews are off. The 06:00 poll looks back `alert_overnight_lookback_hours` (8) to catch overnight news. Deduplicates via `output/state/seen_urls.json`.
+  When `rednote.enabled` is set, the same hourly message also carries the rednote news (see "rednote Digest"); `alert_news.py --no-rednote` skips it.
 
 ### Linux / cron
 
@@ -196,7 +233,8 @@ news_collector/
 │   ├── papers_cron.sh       # Weekly paper wrapper (idempotent per ISO week)
 │   ├── run_workflow.py      # Main orchestrator
 │   ├── run_cron.sh          # Daily wrapper (idempotent)
-│   └── alert_cron.sh        # Alert poller wrapper
+│   ├── alert_cron.sh        # Alert poller wrapper (also runs the rednote part)
+│   └── rednote_digest.py    # rednote home-feed news for the hourly alert (Playwright + LLM)
 ├── output/
 │   ├── daily/               # {topic_id}_{YYYYMMDD}.md
 │   ├── weekly/              # weekly_summary_{YYYYMMDD}.md
