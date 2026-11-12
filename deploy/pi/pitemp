@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""pitemp — the Pi's temperature over time as a text chart, read from
+logs/temp.csv (one sample every 5 min, written by deploy/pi/templog).
+Installed as /usr/local/bin/pitemp by deploy/pi/setup.sh.
+
+    pitemp        last 24 hours
+    pitemp 6h     last 6 hours
+    pitemp 7d     last 7 days (the log keeps 8)
+"""
+import math
+import os
+import re
+import shutil
+import socket
+import sys
+import time
+from datetime import datetime, timedelta
+
+APP = os.environ.get("NEWS_COLLECTOR_DIR", "/home/lin/news_collector")
+CSV = os.path.join(APP, "logs", "temp.csv")
+SAMPLE_SECS = 300
+ROWS = 8
+BLOCKS = " ▁▂▃▄▅▆▇█"
+WARM = 70
+THROTTLE = ["under-voltage", "freq capped", "throttled", "soft temp limit"]
+
+
+def parse_span(arg: str) -> int:
+    m = re.fullmatch(r"(\d+)([hd])", arg.lower())
+    if not m or int(m.group(1)) == 0:
+        sys.exit(f"usage: pitemp [6h | 24h | 7d]   (got {arg!r})")
+    return int(m.group(1)) * (3600 if m.group(2) == "h" else 86400)
+
+
+def load() -> list:
+    """Every logged sample as (epoch, °C, get_throttled bits), oldest first."""
+    samples = []
+    try:
+        with open(CSV) as f:
+            for line in f:
+                parts = line.strip().split(",")
+                try:
+                    thr = int(parts[2], 16) if len(parts) > 2 and parts[2] else 0
+                    samples.append((int(parts[0]), float(parts[1]), thr))
+                except (ValueError, IndexError):
+                    continue
+    except FileNotFoundError:
+        pass
+    return samples
+
+
+def ticks(start: float, end: float, span: int) -> tuple:
+    """Local-time tick marks for the x axis, and their label format."""
+    if span > 86400:
+        every, fmt = 24, "%a"
+    else:
+        every, fmt = (6 if span > 12 * 3600 else 3 if span > 6 * 3600 else 1), "%H:%M"
+    t = datetime.fromtimestamp(start).replace(minute=0, second=0, microsecond=0)
+    out = []
+    while t.timestamp() <= end:
+        if t.timestamp() >= start and t.hour % every == 0:
+            out.append(t)
+        t += timedelta(hours=1)
+    return out, fmt
+
+
+def chart(samples: list, start: float, end: float, span: int, width: int) -> list:
+    step = span / width
+    peaks = [None] * width
+    for ts, temp, _ in samples:
+        i = min(int((ts - start) / step), width - 1)
+        if peaks[i] is None or temp > peaks[i]:
+            peaks[i] = temp
+
+    vals = [p for p in peaks if p is not None]
+    lo = math.floor(min(vals) / 5) * 5
+    hi = max(math.ceil(max(vals) / 5) * 5, lo + 10)
+
+    lines = [" °C"]
+    for r in range(ROWS - 1, -1, -1):
+        cells = []
+        for p in peaks:
+            if p is None:
+                cells.append(" ")
+                continue
+            level = (p - lo) / (hi - lo) * ROWS - r
+            if level >= 1:
+                cells.append("█")
+            elif level <= 0:
+                cells.append("▁" if r == 0 else " ")   # a reading is never blank
+            else:
+                cells.append(BLOCKS[max(1, round(level * 8))])
+        if r == ROWS - 1:
+            label = f"{hi:>4g} ┤"
+        elif r == ROWS // 2 - 1:
+            label = f"{(hi + lo) / 2:>4g} ┤"
+        else:
+            label = "     │"
+        lines.append(label + "".join(cells))
+
+    axis = ["─"] * width
+    labels = [" "] * (width + 6)
+    marks, fmt = ticks(start, end, span)
+    last = -1
+    for t in marks:
+        col = int((t.timestamp() - start) / step)
+        if col >= width:
+            continue
+        axis[col] = "┬"
+        text = t.strftime(fmt)
+        pos = max(0, col - len(text) // 2)
+        if pos <= last:
+            continue
+        labels[pos:pos + len(text)] = text
+        last = pos + len(text)
+    lines.append(f"{lo:>4g} └" + "".join(axis))
+    lines.append("      " + "".join(labels).rstrip())
+    return lines
+
+
+def main() -> None:
+    arg = sys.argv[1] if len(sys.argv) > 1 else "24h"
+    if arg in ("-h", "--help"):
+        print(__doc__.strip())
+        return
+    span = parse_span(arg)
+    end = time.time()
+    start = end - span
+    everything = load()
+    samples = [s for s in everything if s[0] >= start]
+
+    host = socket.gethostname()
+    if not samples:
+        if everything:
+            first = datetime.fromtimestamp(everything[0][0])
+            print(f"No temperature samples in the last {arg}; the log starts {first:%Y-%m-%d %H:%M}.")
+        else:
+            print(f"No temperature log yet ({CSV}). templog adds a sample every 5 min from cron.")
+        return
+
+    cols = shutil.get_terminal_size((64, 24)).columns
+    width = max(12, min(cols - 6, 72, span // SAMPLE_SECS))
+    step = span / width
+    print(f"== {host} temperature, last {arg}")
+    print("\n".join(chart(samples, start, end, span, width)))
+
+    when = "%H:%M" if span <= 86400 else "%a %H:%M"
+    lo = min(samples, key=lambda s: s[1])
+    hi = max(samples, key=lambda s: s[1])
+    avg = sum(s[1] for s in samples) / len(samples)
+    print(f"now {samples[-1][1]:.1f} °C   avg {avg:.1f} °C")
+    print(f"max {hi[1]:.1f} °C at {datetime.fromtimestamp(hi[0]):{when}}")
+    print(f"min {lo[1]:.1f} °C at {datetime.fromtimestamp(lo[0]):{when}}")
+
+    warm = sum(1 for s in samples if s[1] >= WARM)
+    print(f"above {WARM} °C: " + (f"~{warm * SAMPLE_SECS // 60} min" if warm else "never"))
+    bits = 0
+    for s in samples:
+        bits |= s[2]
+    names = [n for i, n in enumerate(THROTTLE) if bits & (1 << i)]
+    print("throttling: " + (", ".join(names) if names else "none"))
+
+    per_col = f"{step / 60:.0f} min" if step < 5400 else f"{step / 3600:.1f} h"
+    print(f"1 column = {per_col} (peak). Spikes: hourly runs.")
+    if everything[0][0] > start + step:
+        print(f"Log starts {datetime.fromtimestamp(everything[0][0]):%m-%d %H:%M}; nothing before.")
+
+
+if __name__ == "__main__":
+    main()

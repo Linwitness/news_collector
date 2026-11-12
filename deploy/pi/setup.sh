@@ -111,7 +111,21 @@ if [ -n "$SYSTEM_CHROMIUM" ]; then
     CRON=$(echo "$CRON" | sed "s|^#REDNOTE_BROWSER_EXECUTABLE=.*|REDNOTE_BROWSER_EXECUTABLE=$SYSTEM_CHROMIUM|")
 fi
 echo "$CRON" | crontab -u "$USER_NAME" - || die
-SUMMARY+="Schedule: $(crontab -u "$USER_NAME" -l | grep -c '^[0-9]') cron jobs (hourly 06-23, daily 17:25/20:25, papers Sat/Sun)"$'\n'
+ln -sf "$APP/deploy/pi/pistatus" /usr/local/bin/pistatus
+ln -sf "$APP/deploy/pi/pitemp" /usr/local/bin/pitemp
+SUMMARY+="Schedule: $(crontab -u "$USER_NAME" -l | grep -c '^[0-9]') cron jobs (hourly 06-23, daily 17:25/20:25, papers Mon/Wed/Sat)"$'\n'
+
+step "monitoring (Netdata)"
+# Optional: a failure is reported in the summary but doesn't stop the setup.
+if curl -fsSL -o /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh \
+   && sh /tmp/netdata-kickstart.sh --native-only --stable-channel --disable-telemetry --non-interactive; then
+    install -m 644 "$APP/deploy/pi/netdata.conf" /etc/netdata/netdata.conf
+    systemctl restart netdata
+    SUMMARY+="Netdata: http://$(hostname):19999 (Tailscale devices only)"$'\n'
+else
+    SUMMARY+="Netdata: install failed (optional; see the setup log)"$'\n'
+fi
+rm -f /tmp/netdata-kickstart.sh
 
 step "self-test: LLM"
 as_user ".venv/bin/python -c 'import sys; sys.path.insert(0, \"scripts\")

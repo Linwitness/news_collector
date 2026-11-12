@@ -22,7 +22,7 @@
         "max_tokens": 32000
       },
       "papers": {
-        "_comment": "Thinking on for the weekly paper analysis (same reasoning as weekly)",
+        "_comment": "Thinking on for the paper analysis (same reasoning as weekly)",
         "thinking": {"type": "enabled"},
         "max_tokens": 32000
       }

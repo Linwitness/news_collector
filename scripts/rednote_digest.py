@@ -29,6 +29,7 @@ import random
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "scripts"))
@@ -68,7 +69,7 @@ FEED_JS = """() => {
     notes: feeds.filter(f => f && f.modelType === 'note' && f.noteCard).map(f => {
       const c = f.noteCard, u = c.user || {};
       return {id: f.id, title: c.displayTitle || '', type: c.type || '',
-              author: u.nickname || u.nickName || ''};
+              author: u.nickname || u.nickName || '', token: f.xsecToken || ''};
     }),
   };
 }"""
@@ -409,6 +410,9 @@ def format_item(note: dict, summary: str) -> str:
     """Telegram HTML: hyperlinked title · author · post time, then the paragraph."""
     title = note.get("title") or note.get("desc", "")[:30] or "（无标题）"
     link = NOTE_LINK.format(id=note["id"])
+    if note.get("token"):
+        # Without the feed's xsec_token rednote answers 300031 "当前笔记暂时无法浏览".
+        link += "?" + urlencode({"xsec_token": note["token"], "xsec_source": "pc_feed"})
     posted = _posted(note.get("time"))
     return (f"📕 <a href=\"{html.escape(link, quote=True)}\">{html.escape(title)}</a>"
             f" · {html.escape(note.get('author', ''))}"

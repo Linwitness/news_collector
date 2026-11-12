@@ -1,0 +1,128 @@
+#!/bin/bash
+# pistatus — one-screen health check of the news collector Pi: hardware
+# (temperature, throttling, fan, memory, disk), network (LAN, Tailscale), the
+# collector's last runs and the AI usage-window check-ins. Read-only. Installed as /usr/local/bin/pistatus by
+# deploy/pi/setup.sh.
+
+APP="${NEWS_COLLECTOR_DIR:-/home/lin/news_collector}"
+LOGS="$APP/logs"
+
+line() { printf '%-11s %s\n' "$1" "$2"; }
+join() { local IFS=","; echo "$*" | sed 's/,/, /g'; }
+latest() { ls -t "$@" 2>/dev/null | head -1; }
+
+# Last "[tag] ..." line a wrapper wrote to its log, plus how that run ended.
+last_run() {
+    local log="$1" tag="$2" n start rest
+    n=$(grep -n "^\[$tag\]" "$log" 2>/dev/null | tail -1 | cut -d: -f1)
+    [ -n "$n" ] || { echo "not run yet"; return; }
+    start=$(sed -n "${n}p" "$log" | sed "s/^\[$tag\] //")
+    rest=$(tail -n +"$((n + 1))" "$log")
+    if echo "$rest" | grep -q '^Done\.'; then
+        echo "$start → done"
+    elif echo "$rest" | grep -q 'ERROR'; then
+        echo "$start → $(echo "$rest" | grep -m1 'ERROR' | sed 's/^ *//' | cut -c1-80)"
+    else
+        echo "$start"
+    fi
+}
+
+echo "== $(hostname) — $(date '+%Y-%m-%d %H:%M %Z')"
+line "uptime" "$(uptime -p | sed 's/^up //'), load $(cut -d' ' -f1-3 /proc/loadavg)"
+
+temp=$(vcgencmd measure_temp 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)?')
+if [ -n "$temp" ]; then
+    t=${temp%.*}
+    if [ "$t" -ge 80 ]; then mark="🔥 hot (throttles at ~85 °C)"
+    elif [ "$t" -ge 70 ]; then mark="⚠️ warm"
+    else mark="✅"; fi
+    line "temp" "$temp °C $mark"
+fi
+line "cpu" "$(( $(vcgencmd measure_clock arm | cut -d= -f2) / 1000000 )) MHz"
+
+rpm=""
+for f in /sys/devices/platform/cooling_fan/hwmon/*/fan1_input /sys/class/hwmon/hwmon*/fan1_input; do
+    [ -r "$f" ] && rpm=$(cat "$f") && break
+done
+if [ -n "$rpm" ]; then line "fan" "$rpm rpm"; else line "fan" "no fan detected"; fi
+
+# get_throttled bits 0-3 = happening now, bits 16-19 = happened since boot.
+thr=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)
+if [ -n "$thr" ]; then
+    v=$((thr))
+    if [ "$v" -eq 0 ]; then
+        line "throttling" "✅ none since boot"
+    else
+        names=("under-voltage" "freq capped" "throttled" "soft temp limit")
+        now=(); past=()
+        for i in 0 1 2 3; do
+            (( v & (1 << i) )) && now+=("${names[$i]}")
+            (( v & (1 << (i + 16)) )) && past+=("${names[$i]}")
+        done
+        line "throttling" "⚠️ $thr — now: $(join "${now[@]:-none}"); since boot: $(join "${past[@]:-none}")"
+    fi
+fi
+
+line "memory" "$(free -h | awk '/^Mem/{print $3 " used / " $2}')"
+read -r used size pct <<<"$(df -h / | awk 'NR==2{print $3, $2, $5}')"
+if [ "${pct%\%}" -ge 85 ]; then dmark="⚠️"; else dmark="✅"; fi
+line "disk" "$used used / $size ($pct) $dmark"
+
+echo "== network"
+line "lan ip" "$(hostname -I | awk '{print $1}')"
+ts_state=$(tailscale status --json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin).get("BackendState", ""))' 2>/dev/null)
+line "tailscale" "$(tailscale ip -4 2>/dev/null || echo '?') (${ts_state:-not running})"
+
+echo "== collector"
+line "code" "$(git -C "$APP" log -1 --format='%h %s (%cr)' 2>/dev/null)"
+
+poll=$(grep -n '^Alert poll @' "$LOGS/alert.log" 2>/dev/null | tail -1)
+if [ -n "$poll" ]; then
+    when=$(echo "$poll" | sed -E 's/^[0-9]+:Alert poll @ ([0-9-]+ [0-9:]+).*/\1/')
+    run=$(tail -n +"${poll%%:*}" "$LOGS/alert.log")
+    result=$(echo "$run" | grep -E 'sent [0-9]+ alert|ERROR' | tail -1 | sed 's/^ *//')
+    line "hourly" "$when — ${result:-nothing new to send}"
+    rn=$(echo "$run" | grep -E 'rednote: screened|rednote SESSION|rednote ERROR|rednote: no new' | tail -1 | sed 's/^ *//')
+    [ -n "$rn" ] && line "" "$rn"
+else
+    line "hourly" "not run yet"
+fi
+
+line "daily" "$(last_run "$LOGS/cron.log" run_cron)"
+report=$(latest "$APP"/output/daily/*.md)
+[ -n "$report" ] && line "" "latest: $(basename "$report") ($(date -r "$report" '+%m-%d %H:%M'))"
+
+line "papers" "$(last_run "$LOGS/papers.log" papers_cron)"
+report=$(latest "$APP"/output/papers/papers_*.md)
+[ -n "$report" ] && line "" "latest: $(basename "$report") ($(date -r "$report" '+%m-%d %H:%M'))"
+
+warned=$(cat "$APP/output/state/rednote_warned" 2>/dev/null)
+if [ "$warned" = "$(date +%Y-%m-%d)" ]; then
+    line "rednote" "⚠️ session warning sent today — log in on the Mac (--login), then --export-state there and --import-state here"
+else
+    line "rednote" "✅ no session warning today${warned:+ (last: $warned)}"
+fi
+
+# Claude Code / Codex usage-window check-ins: not part of this repo, see
+# /etc/cron.d/usage-window-checkins. Shown only where they run.
+CHECKINS=/home/lin/usage-window-checkins/runs.log
+if [ -f "$CHECKINS" ]; then
+    echo "== AI check-ins (4:02, 9:04, 14:06, 19:08)"
+    for name in "Claude Code" "Codex"; do
+        label=${name%% *}
+        last=$(grep " $name: " "$CHECKINS" | tail -1)
+        if [ -z "$last" ]; then
+            line "${label,,}" "not run yet"
+            continue
+        fi
+        when=$(echo "$last" | cut -c6-16 | tr T ' ')
+        rest=${last#* "$name": }
+        if [[ $rest == sent* ]]; then
+            line "${label,,}" "$when ✅ sent"
+        else
+            # Codex prints its banner first; the ERROR line at the end is the reason.
+            err=$(echo "$rest" | grep -oE 'ERROR: .*' | cut -c1-70)
+            line "${label,,}" "$when ⚠️ ${err:-${rest:0:70}}"
+        fi
+    done
+fi

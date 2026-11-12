@@ -1,6 +1,6 @@
 # News collector schedule on the Raspberry Pi (user lin; Linux cron, local time).
-# Installed by deploy/pi/setup.sh. Same slots as the Mac had; the wrappers'
-# idempotency guards make the retry slots no-ops after a success.
+# Installed by deploy/pi/setup.sh. The wrappers' idempotency guards make the
+# retry slots no-ops after a success.
 SHELL=/bin/bash
 PYTHON_BIN=/home/lin/news_collector/.venv/bin/python
 #REDNOTE_BROWSER_EXECUTABLE=/usr/bin/chromium
@@ -9,7 +9,8 @@ PYTHON_BIN=/home/lin/news_collector/.venv/bin/python
 0 6-23 * * * /home/lin/news_collector/scripts/alert_cron.sh
 # Daily reports (Fridays also the weekly summary), with a retry slot
 25 17,20 * * * /home/lin/news_collector/scripts/run_cron.sh
-# Weekly paper report: Saturday 09:00, retries Saturday 15:00 and Sunday 09:00
-0 9 * * 6 /home/lin/news_collector/scripts/papers_cron.sh
-0 15 * * 6 /home/lin/news_collector/scripts/papers_cron.sh
-0 9 * * 0 /home/lin/news_collector/scripts/papers_cron.sh
+# Paper report: Monday, Wednesday and Saturday 09:00, each retried at 15:00.
+# A day whose two slots both fail is picked up by the next run (7-day lookback).
+0 9,15 * * 1,3,6 /home/lin/news_collector/scripts/papers_cron.sh
+# Temperature sample every 5 min for pitemp (logs/temp.csv, kept 8 days)
+*/5 * * * * /home/lin/news_collector/deploy/pi/templog

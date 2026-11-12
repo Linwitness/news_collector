@@ -136,6 +136,25 @@ def _first_sentence(line: str, limit: int = 150) -> str:
     return line[: end.end()] if end else line[:limit]
 
 
+def _bullet_groups(body: str) -> list[tuple[str, list[str]]]:
+    """(label, bullets) for a section made of `**Label**` lines, each followed by
+    bullets, as plain text. Bullets before any label get the label ""; a line that
+    is neither a label nor a bullet continues the bullet above it."""
+    groups = [("", [])]
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        label = re.fullmatch(r"\*\*(.+?)\*\*\s*[:：]?", line)
+        if label:
+            groups.append((label.group(1).strip().rstrip(":："), []))
+        elif re.match(r"[-•*]\s", line) or not groups[-1][1]:
+            groups[-1][1].append(_plain(line.lstrip("-•*").strip()))
+        else:
+            groups[-1][1][-1] += " " + _plain(line)
+    return [(label, bullets) for label, bullets in groups if bullets]
+
+
 def _highlight_items(body: str) -> list[tuple[str, str, str]]:
     """(title, summary, url) for each `### N. [Title](URL)` item of a Highlights
     section. The title prefers the translator's Chinese rendering in
@@ -156,20 +175,20 @@ def _highlight_items(body: str) -> list[tuple[str, str, str]]:
 
 def build_papers_digest(date_str: str, paper_reports: list[tuple]) -> str:
     """
-    Build the Chinese Telegram digest of the weekly paper report: for each topic,
-    a short summary of every Highlights paper with its link right after it, then
-    the predictions. Predictions are capped so the paper summaries make up at
-    least 3/4 of the text.
+    Build the Chinese Telegram digest of a paper report (Mon/Wed/Sat): for each
+    topic, the summary of every Highlights paper with its link right after it,
+    then the gaps & implications. Those are capped so the paper summaries make up
+    at least 3/4 of the text.
 
     The paper template emits H2 sections in a fixed order (found by position,
     so translated headers don't matter):
         0: Highlights  1: Paper Digest  2: Research Trends & Analysis
-        3: Compared with Last Week  4: Predictions & What to Watch
+        3: Gaps & Implications
 
     Args:
         paper_reports: List of (topic_name, item_count, english_report, chinese_report).
     """
-    lines = [f"\U0001f4da 每周论文速递 · {date_str}", ""]
+    lines = [f"\U0001f4da 论文速递 · {date_str}", ""]
 
     for topic_name, count, english, chinese in paper_reports:
         sections = _split_h2_sections(chinese)
@@ -192,22 +211,21 @@ def build_papers_digest(date_str: str, paper_reports: list[tuple]) -> str:
             lines.append("")
             summary_chars += len(title) + len(summary)
 
-        # 4: Predictions — first sentence of each bullet, within a budget of
-        # 1/3 of the summary text (so summaries are >= 3/4 of the total).
-        if len(sections) > 4:
-            header, body = sections[4]
-            budget = summary_chars // 3
-            kept = []
-            for line in _plain(body).splitlines():
-                line = line.strip().lstrip("-•").strip()
-                if not line:
-                    continue
-                sentence = _first_sentence(line)
-                if kept and sum(map(len, kept)) + len(sentence) > budget:
-                    break
-                kept.append(sentence)
-            if kept:
-                lines.append(f"🔭 {header}")
+        # 3: Gaps & Implications — first sentence of each bullet. The groups
+        # (gaps, implications) share a budget of 1/3 of the summary text equally,
+        # so summaries stay >= 3/4 of the total; each keeps at least one bullet.
+        if len(sections) > 3:
+            header, body = sections[3]
+            groups = _bullet_groups(body)
+            share = summary_chars // 3 // max(1, len(groups))
+            for label, bullets in groups:
+                kept = []
+                for bullet in bullets:
+                    sentence = _first_sentence(bullet)
+                    if kept and sum(map(len, kept)) + len(sentence) > share:
+                        break
+                    kept.append(sentence)
+                lines.append(f"🧩 {label or header}")
                 lines += [f"- {k}" for k in kept]
 
         lines.append("")
@@ -348,12 +366,26 @@ def _html_to_plain(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
+# Each stream can have its own bot (its own Telegram chat): None is the main bot, which sends the
+# hourly alerts and the warnings; the others use TELEGRAM_BOT_TOKEN_<CHANNEL> when it is set.
+TELEGRAM_CHANNELS = {None: "🔔 hourly news", "news": "📰 daily & weekly news", "papers": "📚 paper"}
+
+
+def telegram_credentials(channel: str = None) -> tuple[str, str]:
+    """(token, chat_id) for a channel: TELEGRAM_BOT_TOKEN_<CHANNEL> and TELEGRAM_CHAT_ID_<CHANNEL>,
+    each falling back to the main bot's TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID."""
+    def get(key):
+        own = os.environ.get(f"{key}_{channel.upper()}", "").strip() if channel else ""
+        return own or os.environ.get(key, "").strip()
+    return get("TELEGRAM_BOT_TOKEN"), get("TELEGRAM_CHAT_ID")
+
+
 def send_telegram(message: str, base_dir: str = None, html_mode: bool = False,
-                  preview: bool = True) -> None:
+                  preview: bool = True, channel: str = None, fallback: bool = True) -> None:
     """
     Send a message via Telegram bot.
 
-    Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from environment variables.
+    channel picks the bot (see TELEGRAM_CHANNELS and telegram_credentials).
     Long messages are split into multiple sends to stay under Telegram's
     4096-character per-message limit.
 
@@ -361,16 +393,47 @@ def send_telegram(message: str, base_dir: str = None, html_mode: bool = False,
     hyperlinks); if Telegram rejects a chunk's markup (HTTP 400), that chunk is
     resent as plain text so nothing is lost. preview=False turns off link
     preview cards.
+    If a channel's own bot can't reach the chat (_bot_cannot_reach: wrong token,
+    or Start never pressed in its chat), the message is resent through the main
+    bot, since the per-day guards would never send it again; fallback=False
+    turns that off.
     Raises an exception if credentials are missing or any request fails.
     """
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    token, chat_id = telegram_credentials(channel)
 
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
     if not chat_id:
         raise ValueError("TELEGRAM_CHAT_ID environment variable is not set")
 
+    try:
+        _send_chunks(message, token, chat_id, html_mode, preview)
+    except urllib.error.HTTPError as e:
+        main = telegram_credentials()
+        if not fallback or not _bot_cannot_reach(e) or (token, chat_id) == main:
+            raise
+        print(f"  WARNING: the {channel} bot can't reach the chat (HTTP {e.code} {_error_text(e)}; "
+              f"wrong token, or Start not pressed in its chat); sending through the main bot")
+        _send_chunks(message, *main, html_mode, preview)
+
+
+def _error_text(e: urllib.error.HTTPError) -> str:
+    """Telegram's error description, e.g. "Bad Request: chat not found" (the body is read once)."""
+    if not hasattr(e, "telegram_text"):
+        try:
+            e.telegram_text = json.loads(e.read().decode("utf-8")).get("description", "")
+        except Exception:
+            e.telegram_text = ""
+    return e.telegram_text
+
+
+def _bot_cannot_reach(e: urllib.error.HTTPError) -> bool:
+    """True when this bot can't deliver to the chat at all: a wrong token (401), a blocked bot (403),
+    or a chat that never pressed Start (Telegram answers 400 "chat not found")."""
+    return e.code in (401, 403) or (e.code == 400 and "chat not found" in _error_text(e).lower())
+
+
+def _send_chunks(message: str, token: str, chat_id: str, html_mode: bool, preview: bool) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     chunks = _chunk_message(message)
     total = len(chunks)
@@ -398,7 +461,39 @@ def send_telegram(message: str, base_dir: str = None, html_mode: bool = False,
         try:
             post({"text": text, "parse_mode": "HTML"}, idx)
         except urllib.error.HTTPError as e:
-            if e.code != 400:
+            if e.code != 400 or _bot_cannot_reach(e):
                 raise
             print(f"  WARNING: Telegram rejected HTML (chunk {idx}/{total}); resending as plain text")
             post({"text": _html_to_plain(text)}, idx)
+
+
+if __name__ == "__main__":
+    # python3 scripts/notify.py --test : one line through each bot, no fallback, so a broken bot shows.
+    import sys
+    if sys.argv[1:] != ["--test"]:
+        sys.exit("usage: python3 scripts/notify.py --test")
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if os.path.exists(env_path):  # same rules as run_workflow._load_dotenv
+        with open(env_path) as f:
+            for line in f:
+                key, sep, val = line.strip().partition("=")
+                if sep and key and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), val.strip())
+    failed = 0
+    for channel, label in TELEGRAM_CHANNELS.items():
+        own_key = f"TELEGRAM_BOT_TOKEN_{channel.upper()}" if channel else ""
+        how = ("main bot" if not channel else
+               "own bot" if os.environ.get(own_key, "").strip() else f"main bot ({own_key} not set)")
+        try:
+            send_telegram(f"{label} bot connected", channel=channel, fallback=False)
+            result = "sent"
+        except urllib.error.HTTPError as e:
+            failed += 1
+            hint = (" (check the token)" if e.code == 401 else
+                    " (press Start in the bot's chat)" if _bot_cannot_reach(e) else "")
+            result = f"HTTP {e.code} {_error_text(e)}{hint}"
+        except Exception as e:
+            failed += 1
+            result = f"{type(e).__name__}: {str(e)[:120]}"
+        print(f"{channel or 'main':7} {how}: {result}")
+    sys.exit(1 if failed else 0)

@@ -1,11 +1,11 @@
 """
-run_papers.py — Weekly academic-paper report.
+run_papers.py — Academic-paper report, sent Monday, Wednesday and Saturday.
 
 Run manually:
-    python3 scripts/run_papers.py            # normal weekly run
+    python3 scripts/run_papers.py            # normal run
     python3 scripts/run_papers.py --fresh    # ignore seen-paper state (testing)
 
-Or weekly via scripts/papers_cron.sh (see README "Scheduling").
+Or on schedule via scripts/papers_cron.sh (see README "Scheduling").
 Writes output/papers/papers_{YYYYMMDD}.md and sends a Telegram digest.
 """
 
@@ -71,18 +71,27 @@ def main():
     candidates = fetch_all_papers(BASE_DIR, fresh=fresh)
     if not any(candidates.values()):
         # Every source failed or returned nothing (e.g. no network). Write no
-        # report, so papers_cron.sh's next slot this week tries again.
+        # report, so papers_cron.sh's retry slot tries again.
         print("\nERROR: no items fetched from any source (network?) — no report written.")
         sys.exit(1)
 
     print("\nStep 2: Selecting relevant papers per topic …")
-    selected = {}
+    # judged: candidates a triage call actually looked at. unjudged: candidates of
+    # a topic whose triage failed or fell back to keyword order.
+    selected, judged, unjudged = {}, set(), set()
     for topic in topics:
         print(f"\n  Topic: {topic['name']}")
-        selected[topic["id"]] = _with_retries(
+        topic_candidates = candidates.get(topic["id"], [])
+        items, ok = _with_retries(
             f"triage for '{topic['name']}'", triage_topic,
-            topic, candidates.get(topic["id"], []), settings,
-        ) or []
+            topic, topic_candidates, settings,
+        ) or ([], False)
+        selected[topic["id"]] = items
+        (judged if ok else unjudged).update(it["key"] for it in topic_candidates)
+    picked = {it["key"] for items in selected.values() for it in items}
+    # Rejected by every topic that looked at them. Marked seen with the report, so
+    # the next run (2-3 days later, same 7-day lookback) doesn't screen them again.
+    rejected = judged - unjudged - picked
     selected = assign_single_topic(selected)
     print("\n  After keeping each paper in one topic: " +
           ", ".join(f"{tid} {len(items)}" for tid, items in selected.items()))
@@ -93,11 +102,11 @@ def main():
         items = selected[topic["id"]]
         print(f"\n  Topic: {topic['name']}")
         if not items:
-            print("    No relevant papers this week.")
+            print("    No relevant papers in this run.")
             continue
         result = _with_retries(
             f"report for '{topic['name']}'", write_topic_report,
-            topic, items, settings, papers_dir, date_str, date_tag,
+            topic, items, settings, date_str,
         )
         if not result:
             continue
@@ -114,12 +123,13 @@ def main():
     with open(out_path, "w") as f:
         f.write("\n\n---\n\n".join(sections))
     print(f"\n  Written: {out_path}")
-    mark_papers_seen(BASE_DIR, settings, used_keys)
+    mark_papers_seen(BASE_DIR, settings, used_keys + sorted(rejected))
+    print(f"  Marked seen: {len(used_keys)} reported, {len(rejected)} rejected by triage")
 
     print("\nStep 4: Sending Telegram digest …")
     try:
         from notify import build_papers_digest, send_telegram
-        send_telegram(build_papers_digest(date_str, reports), BASE_DIR)
+        send_telegram(build_papers_digest(date_str, reports), BASE_DIR, channel="papers")
         print("  Telegram notification sent.")
     except Exception as e:
         print(f"  WARNING: Telegram notification failed: {e}")

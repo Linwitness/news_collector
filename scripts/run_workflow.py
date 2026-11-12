@@ -72,7 +72,7 @@ def run_weekly(settings: dict, topics: list[dict], date_str: str) -> None:
             try:
                 from notify import build_weekly_digest, send_telegram
                 weekly_digest = build_weekly_digest(date_str, weekly_reports)
-                send_telegram(weekly_digest, BASE_DIR)
+                send_telegram(weekly_digest, BASE_DIR, channel="news")
                 print("  Weekly Telegram digest sent.")
             except Exception as e:
                 print(f"  WARNING: weekly Telegram digest failed: {e}")
@@ -180,7 +180,7 @@ def main():
     try:
         from notify import build_digest, send_telegram
         digest = build_digest(date_str, reports)
-        send_telegram(digest, BASE_DIR)
+        send_telegram(digest, BASE_DIR, channel="news")
         print("  Telegram notification sent.")
     except Exception as e:
         print(f"  WARNING: Telegram notification failed: {e}")

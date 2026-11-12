@@ -1,22 +1,21 @@
 """
-analyze_papers.py — Turn a topic's candidate papers into a weekly paper report.
+analyze_papers.py — Turn a topic's candidate papers into a paper report
+(sent Monday, Wednesday and Saturday).
 
 Two LLM calls per topic (plus translation):
   1. triage: pick the genuinely relevant papers from the keyword-scored candidates
      (then assign_single_topic keeps each paper in one topic)
-  2. report: highlights, digest, analysis, comparison with last week, predictions
+  2. report: highlights, digest, trends, gaps & implications. Each report stands
+     alone: no comparison with the previous one and no predictions.
 Every link in the report must be one of the input URLs (fix_links).
 """
 
-import glob
 import json
-import os
 import re
 
 from llm import LLM, create, get_llm
-from weekly_summary import english_part, read_file
 
-REQUIRED_SECTIONS = ["Highlights", "Paper Digest", "Trends", "Last Week", "Predictions"]
+REQUIRED_SECTIONS = ["Highlights", "Paper Digest", "Trends", "Gaps"]
 LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s?#)]+")
 
@@ -37,7 +36,7 @@ def build_triage_prompt(topic: dict, candidates: list[dict], limit: int) -> str:
 Flag an item as a milestone even if it is mainly a modeling or materials paper.
 
 Reply with only a JSON object, e.g. {{"selected": [4, 0, 17], "milestones": [0]}}."""
-    return f"""You are screening this week's new research items for a weekly report.
+    return f"""You are screening new research items for a paper report.
 
 Topic: {topic['name']}
 Scope: {topic['description']}
@@ -58,12 +57,13 @@ at most {limit}; selecting fewer is fine when fewer qualify.
 {reply_format}"""
 
 
-def triage(llm: LLM, topic: dict, candidates: list[dict], limit: int) -> list[dict]:
-    """Return the selected candidates, most important first. Items flagged as
-    milestones get item["milestone"] = True. Falls back to the top `limit` by
-    keyword score if the reply can't be parsed."""
+def triage(llm: LLM, topic: dict, candidates: list[dict], limit: int) -> tuple[list[dict], bool]:
+    """Return (selected candidates, most important first; judged). Items flagged
+    as milestones get item["milestone"] = True. If the reply can't be parsed it
+    falls back to the top `limit` by keyword score with judged=False: the rest
+    were not actually rejected."""
     if len(candidates) <= 3:
-        return candidates
+        return candidates, True
     reply = create(llm, build_triage_prompt(topic, candidates, limit))
     indices, milestones = None, []
     try:
@@ -78,36 +78,20 @@ def triage(llm: LLM, topic: dict, candidates: list[dict], limit: int) -> list[di
         indices = None
     if not indices:
         print("    WARNING: could not parse triage reply; using top candidates by score")
-        return candidates[:limit]
+        return candidates[:limit], False
     picked, seen = [], set()
     for i in indices:
         if isinstance(i, int) and 0 <= i < len(candidates) and i not in seen:
             seen.add(i)
             picked.append({**candidates[i], "milestone": i in milestones})
-    return picked[:limit]
+    return picked[:limit], True
 
 
 # ---------------------------------------------------------------------------
 # 2. Report
 # ---------------------------------------------------------------------------
 
-def get_last_paper_report(papers_dir: str, topic_name: str, date_tag: str) -> str:
-    """This topic's English section of the most recent earlier paper report, or ""."""
-    files = sorted(
-        f for f in glob.glob(os.path.join(papers_dir, "papers_*.md"))
-        if os.path.basename(f) < f"papers_{date_tag}.md"
-    )
-    if not files:
-        return ""
-    content = read_file(files[-1])
-    start = content.find(f"# {topic_name}: Weekly Paper Report")
-    if start == -1:
-        return ""
-    return english_part(content[start:])
-
-
-def build_report_prompt(topic: dict, papers: list[dict], last_report: str, date_str: str,
-                        highlights: int = 5) -> str:
+def build_report_prompt(topic: dict, papers: list[dict], date_str: str, highlights: int = 5) -> str:
     block = ""
     for i, it in enumerate(papers, 1):
         label = {"preprint": "Preprint", "report": "Technical report", "news": "News"}.get(it["kind"], "Journal article")
@@ -119,25 +103,16 @@ def build_report_prompt(topic: dict, papers: list[dict], last_report: str, date_
             f"   Abstract: {it['abstract'] or '(not available — use the title only, do not guess results)'}\n\n"
         )
 
-    prior = ""
-    if last_report:
-        prior = f"""
-## Last week's report on this topic (for continuity):
-
-{last_report}
-
----
-"""
-
     guidance = f"\nTopic-specific guidance: {topic['report_guidance']}\n" if topic.get("report_guidance") else ""
 
-    return f"""You are a senior research analyst writing a weekly literature report for an
-expert reader. Today is {date_str}.
+    return f"""You are a senior research analyst writing a literature report for an expert
+reader. Reports go out on Monday, Wednesday and Saturday, and each covers the items
+that are new since the previous one. Today is {date_str}.
 
 Topic: **{topic['name']}**
 Scope: {topic['description']}
-{guidance}{prior}
-## This week's new items ({len(papers)}):
+{guidance}
+## New items in this report ({len(papers)}):
 
 {block}
 ---
@@ -145,53 +120,59 @@ Scope: {topic['description']}
 Rules:
 - Use only the items above. Base claims about an item on its abstract; if there is
   no abstract, describe it from its title only and do not invent results.
-- Every time you mention an item, link it as [Title](URL) using its exact URL from
-  the list (a shortened title is fine in running text). Never write any other URL,
-  and never show the [P#] labels — they are only for your reference.
+- Every time you mention an item, link it using its exact URL from the list. Never
+  write any other URL, and never show the [P#] labels — they are only for your
+  reference. In Highlights headings and the Paper Digest the link text is the full
+  title; in Research Trends & Analysis and Gaps & Implications it is a short label
+  of 2-6 words instead, e.g. [ST-E1 gyrokinetics](URL).
 - Mark preprints "(preprint)", technical reports "(report)" and news items "[News]".
 - Mention every item at least once (in Highlights or in the Paper Digest).
 - Items marked "Milestone" mark a step forward for a fusion program; put them in
   Highlights unless there are more than {highlights}.
 - Items with Date "unknown" come from journal feeds that release a whole issue at
   once. Do not read the number of items from one journal as a trend in the field.
+- Analyze what these items show now. Do not predict future results, timelines or
+  what the field will do next.
 
 Produce the report in this EXACT markdown format (English only):
 
 ---
 
-# {topic['name']}: Weekly Paper Report — Week of {date_str}
+# {topic['name']}: Paper Report — {date_str}
 
 ## Highlights
 [The {highlights} most significant items (fewer if fewer stand out). Prefer items
 with an abstract. For each:
 ### N. [Title](URL)
 *Authors — Venue, Date*
-2-4 sentences: what they did, the key result, and why it matters for this field.]
+One paragraph of 4-6 sentences, in prose (no sub-headings, lists or bold labels):
+the question and the method or setup; the key result, with the numbers the
+abstract gives (sizes, errors, temperatures, speed-ups, conditions); the
+limitations or caveats (e.g. simulation only, no validation, small sample, model
+material or proxy isotope, narrow parameter range, abstract cut off); and why it
+matters for this field. Do not add numbers the abstract does not give.]
 
 ## Paper Digest
 [All remaining items, grouped under short **bold sub-theme** labels. One line each:
 - [Title](URL) — one-sentence takeaway.]
 
 ## Research Trends & Analysis
-[2-4 paragraphs of synthesis, not a list of papers: what this week's work says
-about where the field is moving — recurring methods, maturing vs. emerging
-directions, disagreements, gaps, and notable groups or facilities. Make an
-argument in each paragraph and support it with the 2-4 most telling items; do
-not string many titles together.]
+[2-4 paragraphs of synthesis, not a list of papers: what this batch says about
+where the field is moving — recurring methods, maturing vs. emerging directions,
+disagreements, and notable groups or facilities. Make an argument in each
+paragraph and support it with the 2-4 most telling items; do not string many
+titles together.]
 
-## Compared with Last Week
-[If last week's report is given: which of its predictions and trends this week's
-items support or contradict, and what is new. Otherwise write that this is the
-first weekly paper report.]
-
-## Predictions & What to Watch
-[Field-level predictions that a reader could check later, not "expect follow-ups
-to paper X". Each states what will happen, roughly when, and what would show it
-was wrong; name the evidence from this week that supports it. Say how confident
-you are (low / medium / high).]
-- **Next 1-3 months:** [1-2 predictions]
-- **Next 6-12 months:** [1-2 predictions]
-- **Open questions / wildcards:** [what could change the picture]
+## Gaps & Implications
+[Based only on the items above. Exactly these two bold labels, each on its own
+line and followed by 2-4 bullets:
+**Gaps**
+- What these items leave open (missing validation, untested regimes or
+  materials, unavailable data, methods that do not yet connect), naming the
+  items that show it.
+**Implications**
+- What these results mean now for design choices, codes and models,
+  experiments or facilities in this field, naming the items behind it.]
 
 ---
 
@@ -202,7 +183,7 @@ you are (low / medium / high).]
 def check_papers(report: str, allowed_urls: set, expected_urls: set = frozenset()) -> tuple[str, list[str]]:
     """Validate a report that has been through fix_links. Returns (report, problems).
 
-    Drops any preamble before the title, and requires the 5 sections, a link on
+    Drops any preamble before the title, and requires the 4 sections, a link on
     every Highlights item, and (nearly) every expected item to be mentioned.
     """
     start = report.find("# ")
@@ -258,8 +239,9 @@ def _translate_to_chinese(llm: LLM, english_report: str) -> str:
     prompt = f"""Translate the following English research report into Chinese.
 Keep all markdown formatting, section structure, and URLs intact.
 Translate section headers too. Keep URL hrefs as-is but translate anchor text.
-Keep paper titles in their original English inside the link text, followed by
-a short Chinese rendering in parentheses.
+In the Highlights headings and the Paper Digest, keep paper titles in their
+original English inside the link text, followed by a short Chinese rendering in
+parentheses. Elsewhere the links have short labels: translate those into Chinese.
 
 ---
 
@@ -268,16 +250,17 @@ a short Chinese rendering in parentheses.
     return create(llm, prompt, translation=True)
 
 
-def triage_topic(topic: dict, candidates: list[dict], settings: dict) -> list[dict]:
-    """Pick this topic's relevant items, most important first."""
+def triage_topic(topic: dict, candidates: list[dict], settings: dict) -> tuple[list[dict], bool]:
+    """Pick this topic's relevant items, most important first. Returns
+    (selected, judged); see triage()."""
     limit = settings.get("papers", {}).get("max_papers_per_topic", 50)
     # Thinking on: with it off, the screen let through pseudo-scientific preprints.
     llm = get_llm(settings, task="papers")
     print(f"    Triage: {len(candidates)} candidates ({llm.provider}, {llm.model}) …")
-    selected = triage(llm, topic, candidates, limit)
+    selected, judged = triage(llm, topic, candidates, limit)
     flagged = sum(it.get("milestone", False) for it in selected)
     print(f"    Selected {len(selected)} items" + (f" ({flagged} milestones)" if flagged else ""))
-    return selected
+    return selected, judged
 
 
 def assign_single_topic(selected: dict) -> dict:
@@ -293,16 +276,13 @@ def assign_single_topic(selected: dict) -> dict:
     return {tid: [it for it in items if best[it["key"]][0] == tid] for tid, items in selected.items()}
 
 
-def write_topic_report(topic: dict, selected: list[dict], settings: dict,
-                       papers_dir: str, date_str: str, date_tag: str) -> tuple:
+def write_topic_report(topic: dict, selected: list[dict], settings: dict, date_str: str) -> tuple:
     """Return (english_report, chinese_report) for one topic's selected items."""
     llm = get_llm(settings, task="papers")
     highlights = settings.get("papers", {}).get("highlights_per_topic", 5)
-    last_report = get_last_paper_report(papers_dir, topic["name"], date_tag)
     expected = {it["link"] for it in selected}
-    # Links may point at this week's items or at papers in last week's report.
-    allowed = expected | {url for _, url in LINK_RE.findall(last_report)}
-    prompt = build_report_prompt(topic, selected, last_report, date_str, highlights)
+    allowed = expected  # links may only point at this report's items
+    prompt = build_report_prompt(topic, selected, date_str, highlights)
 
     print(f"    Writing report on {len(selected)} items ({llm.provider}, {llm.model}) …")
     # One retry on a failed check; after that keep it with a warning (raising

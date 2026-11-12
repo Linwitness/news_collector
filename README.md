@@ -16,11 +16,32 @@ cp .env.example .env   # then fill in your keys
 | Variable | Required | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | if Anthropic active | Claude API access for analysis |
-| `TELEGRAM_BOT_TOKEN` | optional | Telegram bot for digests & alerts |
+| `TELEGRAM_BOT_TOKEN` | optional | Main Telegram bot: hourly alerts and warnings, and every message whose own bot isn't set |
 | `TELEGRAM_CHAT_ID` | optional | Chat that receives the messages |
+| `TELEGRAM_BOT_TOKEN_NEWS` | optional | Own bot for the daily and weekly digests |
+| `TELEGRAM_BOT_TOKEN_PAPERS` | optional | Own bot for the paper digest |
 | `GENERAL_API_KEY` | if DeepSeek active | DeepSeek API key (current active LLM provider) |
 
 Without the Telegram variables the pipeline still runs and writes reports; only the notifications are skipped.
+
+### Telegram bots
+
+Each stream can come from its own bot, so it gets its own chat in Telegram with its own notification settings:
+
+| Bot | Sends |
+|---|---|
+| main (`TELEGRAM_BOT_TOKEN`) | hourly headlines and rednote notes; the rednote login warning; the Pi's setup report and AI check-in alerts |
+| news (`TELEGRAM_BOT_TOKEN_NEWS`) | the daily digest and the Friday weekly digest |
+| papers (`TELEGRAM_BOT_TOKEN_PAPERS`) | the Monday/Wednesday/Saturday paper digest |
+
+- **Adding a bot:**
+  1. In Telegram, send `/newbot` to @BotFather and copy the token it returns.
+  2. Open the new bot's chat and press **Start**. A bot can't message you until you do.
+  3. Add the token to `.env` on every machine that runs the pipeline.
+- **Chat ID:** all bots send to `TELEGRAM_CHAT_ID`. That works when it is a private chat (your own user ID). `TELEGRAM_CHAT_ID_NEWS` / `_PAPERS` override it per bot.
+- **Missing token:** that stream uses the main bot.
+- **Rejected by its own bot:** if the bot can't reach the chat, the message is resent through the main bot with a warning in the log, so a digest is never lost. That covers HTTP 401 (wrong token), 403 (bot blocked) and 400 "chat not found" (Start never pressed).
+- **Checking:** `python3 scripts/notify.py --test` sends one line through each bot and prints which bot each stream uses.
 
 ### Switching LLM provider
 
@@ -35,7 +56,7 @@ python3 scripts/run_workflow.py
 Output:
 - `output/daily/{topic_id}_{YYYYMMDD}.md` — one per topic per day
 - `output/weekly/weekly_summary_{YYYYMMDD}.md` — generated every Friday
-- Telegram: a daily digest after each run, plus a weekly digest on Fridays
+- Telegram (news bot): a daily digest after each run, plus a weekly digest on Fridays
 
 ## Configure
 
@@ -65,9 +86,9 @@ Edit `config/providers.json`:
 { "name": "My Source", "rss": "https://example.com/feed.xml" }
 ```
 
-## Weekly Paper Report
+## Paper Report (Monday, Wednesday, Saturday)
 
-A separate weekly job collects new research papers (plus a few fusion news items) and writes an analysis with predictions. Every item it discusses is linked.
+A separate job collects new research papers (plus a few fusion news items) three times a week and writes an analysis of them: what each important paper did and found, its limitations, and what the batch leaves open and means for the field. It makes no predictions. Every item it discusses is linked.
 
 ```bash
 python3 scripts/run_papers.py            # normal run
@@ -77,12 +98,12 @@ python3 scripts/fetch_papers.py          # fetch only: show candidates per topic
 
 - **Topics** — `config/paper_topics.json`: `name`, a `description` of the scope (used by the LLM), `keywords` (scoring), `min_score`, an `arxiv_query`, `queries` for OpenAlex/OSTI, and optional `require` groups (an item must match one keyword from each group).
 - **Sources** — `config/paper_sources.json`: arXiv, OpenAlex (most journals), OSTI (DOE reports), journal RSS feeds (Nuclear Fusion, PPCF, Fusion Eng. Des., Nucl. Mater. Energy, J. Nucl. Mater., Physics of Plasmas), and fusion news feeds limited to the development topic (`"topics"`, `"kind": "news"`). An RSS source can set `core_topics` (its papers count as on-topic even without keyword hits) and `openalex_issn` (fill missing abstracts from OpenAlex — ScienceDirect feeds carry titles only).
-- **Pipeline** — fetch the last `papers.lookback_days`, drop corrections/retractions, merge preprint/journal/dataset versions of a work, skip papers already reported (`output/state/seen_papers.json`), keyword-score, then: an LLM triage per topic (thinking on, to screen out pseudo-science) picks up to `papers.max_papers_per_topic`, each paper is kept in a single topic — one whose `milestones` description the triage matched it to (e.g. a record result goes to Fusion Energy Development and into its Highlights), else its best-scoring topic — and a report call writes `papers.highlights_per_topic` Highlights, a Paper Digest of every other selected paper, Research Trends & Analysis, Compared with Last Week, and checkable Predictions. Links are checked against the fetched items; anything else is removed. A topic's optional `report_guidance` is passed to the report prompt.
-- **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest: per topic, a 2–4 sentence summary of each Highlights paper with its link right after it, then the predictions (trimmed so the summaries are at least ¾ of the text).
+- **Pipeline** — fetch the last `papers.lookback_days`, drop corrections/retractions, merge preprint/journal/dataset versions of a work, skip papers already reported or already rejected by a triage (`output/state/seen_papers.json`; with runs 2–3 days apart and a 7-day lookback, this keeps a rejected paper from being screened again), keyword-score, then: an LLM triage per topic (thinking on, to screen out pseudo-science) picks up to `papers.max_papers_per_topic`, each paper is kept in a single topic — one whose `milestones` description the triage matched it to (e.g. a record result goes to Fusion Energy Development and into its Highlights), else its best-scoring topic — and a report call writes `papers.highlights_per_topic` Highlights (4–6 sentences each: method, key numbers, limitations, why it matters), a Paper Digest of every other selected paper, Research Trends & Analysis, and Gaps & Implications. Each report stands alone: it doesn't see the previous one. Links are checked against the fetched items; anything else is removed. A topic's optional `report_guidance` is passed to the report prompt.
+- **Output** — `output/papers/papers_{YYYYMMDD}.md` (English + Chinese per topic) and a Chinese Telegram digest from the papers bot: per topic, the summary of each Highlights paper with its link right after it, then the first sentence of a few gaps and implications (trimmed so the summaries are at least ¾ of the text).
 
 ### Planned improvements
 
-1. **Read selected papers in detail.** The report currently works from titles and abstracts only (and some journal items have no abstract). Fetch the full text (open-access PDF/HTML, e.g. arXiv or OpenAlex `open_access` links) for the selected papers, at least the Highlights, and base summaries, trends and predictions on methods, results and limitations rather than the abstract alone.
+1. **Read selected papers in detail.** The report currently works from titles and abstracts only (and some journal items have no abstract). Fetch the full text (open-access PDF/HTML, e.g. arXiv or OpenAlex `open_access` links) for the selected papers, at least the Highlights, and base summaries, trends, gaps and implications on methods, results and limitations rather than the abstract alone.
 
 ## rednote Digest
 
@@ -117,6 +138,12 @@ On first boot, `newspi-setup.service` runs `deploy/pi/setup.sh`, retrying every 
 - reports ✅ or ❌ to Telegram. The log is `/var/log/newspi-setup.log`, also copied to the card's boot partition.
 
 Then `ssh lin@newspi.local` (or `ssh lin@newspi` from anywhere once both machines are on Tailscale). Turn the Mac's jobs off (crontab line, `launchctl bootout` of the agents) so only one machine sends.
+
+Run `pistatus` on the Pi (`ssh lin@newspi pistatus`) for a one-screen health check: temperature and throttling, fan, memory, disk, Tailscale, and the collector's last hourly, daily and paper runs.
+
+Temperature history:
+- `pitemp` (or `pitemp 6h`, `pitemp 7d`) draws a text chart of the Pi's temperature. `deploy/pi/templog` samples it every 5 min from cron into `logs/temp.csv` and keeps 8 days.
+- Netdata (`http://newspi:19999`) is a browser dashboard of temperature, CPU, memory, disk and network. History is per-second for 14 days, per-minute for 3 months and hourly for 2 years. `deploy/pi/netdata.conf` lets only the Pi itself and Tailscale devices connect. On the sign-in page, choose "Skip and use the dashboard anonymously".
 
 To read the reports on the Mac, `scripts/sync_reports.sh` mirrors the Pi's `output/` into this checkout with rsync over SSH. It tries `newspi` (Tailscale) first, then `newspi.local`. A LaunchAgent runs it every 60 minutes, with the same plist layout as above, using `StartInterval` 3600 and `RunAtLoad`.
 
@@ -186,27 +213,18 @@ Load it with:
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.newscollector.daily.plist
 ```
 
-### Weekly paper report (launchd)
+### Paper report (launchd)
 
-`scripts/papers_cron.sh` runs `run_papers.py` and skips if a report already exists for the current ISO week. Use the plist above with a new `Label` (e.g. `com.example.newscollector.papers`), `scripts/papers_cron.sh` in `ProgramArguments`, `logs/papers.launchd.log` for output, and a weekly `StartCalendarInterval` with retry slots (skipped once the week's report exists; `run_papers.py` writes no report and exits 1 if no source returned anything):
+`scripts/papers_cron.sh` runs `run_papers.py` and skips if today's report already exists. The Pi runs it Monday, Wednesday and Saturday at 09:00 with a 15:00 retry (`deploy/pi/crontab.txt`). On a Mac, use the plist above with a new `Label` (e.g. `com.example.newscollector.papers`), `scripts/papers_cron.sh` in `ProgramArguments`, `logs/papers.launchd.log` for output, and these slots (a retry is skipped once that day's report exists; `run_papers.py` writes no report and exits 1 if no source returned anything, and a day whose slots all fail is covered by the next run's 7-day lookback):
 ```xml
 <key>StartCalendarInterval</key>
 <array>
-    <dict>
-        <key>Weekday</key><integer>6</integer>   <!-- Saturday 09:00 -->
-        <key>Hour</key><integer>9</integer>
-        <key>Minute</key><integer>0</integer>
-    </dict>
-    <dict>
-        <key>Weekday</key><integer>6</integer>   <!-- Saturday 15:00 retry -->
-        <key>Hour</key><integer>15</integer>
-        <key>Minute</key><integer>0</integer>
-    </dict>
-    <dict>
-        <key>Weekday</key><integer>0</integer>   <!-- Sunday 09:00 retry -->
-        <key>Hour</key><integer>9</integer>
-        <key>Minute</key><integer>0</integer>
-    </dict>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>   <!-- Monday -->
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>  <!-- retry -->
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>   <!-- Wednesday -->
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>  <!-- retry -->
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>   <!-- Saturday -->
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>0</integer></dict>  <!-- retry -->
 </array>
 ```
 
@@ -225,12 +243,12 @@ news_collector/
 │   ├── fetch_news.py        # RSS fetching + keyword filtering
 │   ├── analyze_news.py      # Claude API analysis
 │   ├── weekly_summary.py    # Friday weekly synthesis
-│   ├── notify.py            # Telegram digests (daily + weekly)
+│   ├── notify.py            # Telegram digests and sending, one bot per stream (--test)
 │   ├── alert_news.py        # Near-real-time headline alerts (no API calls)
 │   ├── fetch_papers.py      # Paper fetching, dedup, scoring
-│   ├── analyze_papers.py    # Paper triage + weekly paper report
-│   ├── run_papers.py        # Weekly paper-report entry point
-│   ├── papers_cron.sh       # Weekly paper wrapper (idempotent per ISO week)
+│   ├── analyze_papers.py    # Paper triage + paper report
+│   ├── run_papers.py        # Paper-report entry point (Mon/Wed/Sat)
+│   ├── papers_cron.sh       # Paper wrapper (idempotent per day)
 │   ├── run_workflow.py      # Main orchestrator
 │   ├── run_cron.sh          # Daily wrapper (idempotent)
 │   ├── alert_cron.sh        # Alert poller wrapper (also runs the rednote part)

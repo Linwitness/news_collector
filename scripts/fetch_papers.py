@@ -340,7 +340,8 @@ def load_seen(state_path: str, ttl_days: int) -> dict:
 
 
 def mark_papers_seen(base_dir: str, settings: dict, keys: list) -> None:
-    """Record papers that made it into a written report, so they aren't repeated."""
+    """Record papers that made it into a written report, or that triage rejected,
+    so they aren't repeated or screened again."""
     cfg = settings.get("papers", {})
     state_path = _state_path(base_dir, cfg)
     seen = load_seen(state_path, cfg.get("seen_ttl_days", 90))

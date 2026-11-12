@@ -1,0 +1,18 @@
+#!/bin/bash
+# templog — append one temperature sample to logs/temp.csv as
+# "epoch,°C,get_throttled". Run every 5 min from cron (deploy/pi/crontab.txt);
+# pitemp draws the chart. Keeps the last 8 days.
+
+APP="${NEWS_COLLECTOR_DIR:-/home/lin/news_collector}"
+CSV="$APP/logs/temp.csv"
+KEEP=2304   # 8 days at one sample per 5 min
+
+milli=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null) || exit 0
+thr=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)
+mkdir -p "$(dirname "$CSV")"
+printf '%s,%d.%d,%s\n' "$(date +%s)" $((milli / 1000)) $((milli % 1000 / 100)) "$thr" >> "$CSV"
+
+# Trim once a day's worth of extra lines has built up, not on every run.
+if [ "$(wc -l < "$CSV")" -gt $((KEEP + 288)) ]; then
+    tail -n "$KEEP" "$CSV" > "$CSV.tmp" && mv "$CSV.tmp" "$CSV"
+fi
